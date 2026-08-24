@@ -29,22 +29,22 @@
       "p2p transfer",
       "direct transfer"
     ],
-    "author": "OmShare",
+    "author": "OM Patil",
     "language": "en",
     "robots": "index, follow",
     "canonical": "https://omshare.app/",
     "pages": [
       {
         "path": "/",
-        "title": "OmShare - Free P2P File Transfer | Send Large Files Instantly",
+        "title": "OmShare - Free P2P File Transfer | Send Large Files Without Limits",
         "description": "Send files of any size instantly with OmShare. Peer-to-peer file sharing with no sign-up, no server storage, and no file size limits.",
         "keywords": "file transfer, p2p, peer to peer, free file sharing, no size limit",
         "priority": 1.0,
-        "changefreq": "weekly"
+        "changefreq": "daily"
       },
       {
         "path": "/how-it-works",
-        "title": "How OmShare Works - Free P2P File Transfer Guide",
+        "title": "How OmShare Works - Free P2P File Transfer Technology Guide",
         "description": "Learn how OmShare works: secure peer-to-peer file transfer, no sign-up, unlimited file size. Get started in seconds with our simple 6-digit code system.",
         "keywords": "how file transfer works, p2p file sharing, WebRTC, secure file sharing",
         "priority": 0.9,
@@ -52,18 +52,18 @@
       },
       {
         "path": "/privacy",
-        "title": "Privacy Policy - OmShare",
+        "title": "Privacy Policy - OmShare Zero-Storage File Transfer",
         "description": "OmShare privacy policy: We don't store files, don't track users, and don't collect personal data. Your transfers are completely private.",
         "keywords": "privacy policy, data protection, file privacy",
-        "priority": 0.7,
+        "priority": 0.6,
         "changefreq": "yearly"
       },
       {
         "path": "/terms",
-        "title": "Terms of Service - OmShare",
+        "title": "Terms of Service - OmShare Free P2P File Sharing",
         "description": "OmShare terms of service: free peer-to-peer file transfer service. Read our terms for usage, limitations, and disclaimers.",
         "keywords": "terms of service, terms and conditions, legal",
-        "priority": 0.7,
+        "priority": 0.6,
         "changefreq": "yearly"
       }
     ],
@@ -72,16 +72,16 @@
       "locale": "en_US",
       "siteName": "OmShare",
       "image": {
-        "url": "https://omshare.app/og-image.png",
-        "width": 1200,
-        "height": 630,
-        "type": "image/png"
+        "url": "https://omshare.app/icon-512.svg",
+        "width": 512,
+        "height": 512,
+        "type": "image/svg+xml"
       }
     },
     "twitter": {
       "card": "summary_large_image",
       "creator": "@omshare",
-      "image": "https://omshare.app/twitter-image.png"
+      "image": "https://omshare.app/icon-512.svg"
     },
     "schema": {
       "organization": {
@@ -90,10 +90,16 @@
         "name": "OmShare",
         "url": "https://omshare.app",
         "logo": "https://omshare.app/icon-512.svg",
+        "founder": {
+          "@type": "Person",
+          "name": "OM Patil",
+          "url": "https://om-patil.com"
+        },
         "description": "Free peer-to-peer file transfer service",
         "sameAs": [
-          "https://twitter.com/omshare",
-          "https://github.com/omshare"
+          "https://github.com/omspradippatil/OM-Share",
+          "https://github.com/omspradippatil",
+          "https://in.linkedin.com/in/om-pradip-patil"
         ]
       },
       "application": {
@@ -178,7 +184,7 @@
   },
   "security": {
     "https": true,
-    "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://firebase.googleapis.com https://*.firebaseio.com",
+    "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://firestore.googleapis.com https://*.googleapis.com https://firebase.googleapis.com https://*.firebaseio.com https://*.firebase.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; manifest-src 'self'",
     "referrer": "strict-origin-when-cross-origin",
     "permissions": "geolocation=(), microphone=(), camera=()"
   }

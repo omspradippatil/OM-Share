@@ -6,143 +6,129 @@
   <img src="icon-192.svg" width="64" alt="OmShare Logo">
 </p>
 
+OmShare enables fast, direct, and end-to-end encrypted browser-to-browser file transfers using **WebRTC DataChannels**, backed by **Firebase Firestore** for primary real-time signaling and an **AJAX Serverless REST API** for automatic offline/network fallback.
+
+---
+
 ## Quick Start
 
-1. **Sender**: Select any file → Get 6-digit code → Share the code
-2. **Receiver**: Enter 6-digit code → Download file
+1. **Sender**: Select any file → Click **Generate Code** → Share the 6-digit code.
+2. **Receiver**: Enter the 6-digit code → Click **Connect** → The file streams directly and downloads automatically.
 
-## Setup for Production
+---
 
-### 1. Create Firebase Project
+## Project Structure
 
-```bash
-# Go to https://console.firebase.google.com
-# Create new project "omshare"
+```
+OM-Share/
+├── js/
+│   ├── env-config.js     # Auto-generated runtime environment config (from .env.local / build)
+│   ├── config.js         # Configuration loader, STUN/TURN parsing & credential validation
+│   ├── ajax.js           # Resilient AJAX utility (retries, timeouts, ping, Firebase health check)
+│   ├── signaling.js      # Hybrid Signaling Manager (Firebase Firestore + AJAX Fallback)
+│   ├── webrtc.js         # WebRTC DataChannel engine, 64KB chunking & backpressure flow control
+│   └── app.js            # UI controller, drag & drop, progress speed calculation & toasts
+├── functions/
+│   └── signaling.js      # Netlify serverless function for fallback AJAX signaling
+├── test/
+│   ├── ajax.test.js      # Unit tests for HTTP helpers and latency ping
+│   ├── config.test.js    # Unit tests for config manager & credential detection
+│   ├── functions.test.js # Unit tests for serverless signaling lifecycle
+│   └── webrtc.test.js    # Unit tests for chunking calculations & 6-digit code generators
+├── index.html            # Main transfer application interface
+├── how-it-works.html     # Architecture and guide page
+├── privacy.html          # Privacy policy
+├── terms.html            # Terms of service
+├── css/
+│   └── styles.css        # Responsive design system & creator layout
+├── inject-env.js         # Build script that generates js/env-config.js
+├── netlify.toml          # Netlify routing, headers, CSP, and function configuration
+├── firestore.rules       # Firebase Firestore security rules
+├── firebase.json         # Firebase hosting and index settings
+├── package.json          # Project scripts and dependencies
+└── README.md             # Project documentation
 ```
 
-### 2. Enable Firestore
+---
 
-1. In Firebase Console → Build → Firestore Database
-2. Create database (start in **test mode** for development)
-3. Copy your web app config
+## Architecture & How Signaling Works
 
-### 3. Update Firebase Config
-
-Edit `app.js` line 8-16:
-
-```javascript
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abc123"
-};
+```
+                        ┌───────────────────────────────┐
+                        │      Signaling Layer          │
+                        │                               │
+                        │  1. Primary: Firebase Firestore│
+                        │  2. Fallback: AJAX REST API   │
+                        └───────┬───────────────┬───────┘
+                                │               │
+                        (Offers/Answers) (Offers/Answers)
+                                │               │
+                        ┌───────▼───────┐┌──────▼───────┐
+                        │  Sender Peer  ││Receiver Peer │
+                        └───────┬───────┘└──────┬───────┘
+                                │               │
+                                └─── WebRTC ────┘
+                              (Direct P2P Stream)
 ```
 
-### 4. Deploy to Netlify
+1. **Signaling**: Only used to exchange metadata, WebRTC SDP offers/answers, and ICE candidate connection routes.
+2. **Automatic AJAX Fallback**: If Firebase is blocked by CSP, offline, or experiencing network timeout, the application automatically fails over to the AJAX REST signaling layer (`/.netlify/functions/signaling`).
+3. **Data Transfer**: 100% Peer-to-Peer via WebRTC `RTCDataChannel`. Files are streamed in 64KB chunks directly between browsers—never touching any backend server.
 
-```bash
-# Connect your repo to Netlify
-# It auto-detects netlify.toml config
+---
 
-# Or manual deploy:
-npm install -g netlify-cli
-netlify deploy --prod
-```
+## Fixing the "Failed to get document because the client is offline" Error
+
+If you encountered `Failed to get document because the client is offline`, this repository includes complete fixes for all 4 root causes:
+
+1. **Content Security Policy (CSP)**: `netlify.toml` and `seo.config.json` now include `https://firestore.googleapis.com`, `https://*.googleapis.com`, and `wss://*.firebaseio.com` in `connect-src`.
+2. **Configuration Loader**: `inject-env.js` reads `.env.local`, `.env`, and Netlify environment variables (supporting both `FIREBASE_*` and `VITE_FIREBASE_*`), generating `js/env-config.js`.
+3. **Graceful Error Recovery & AJAX Fallback**: `js/signaling.js` detects offline/unreachable Firestore states and seamlessly falls back to the serverless AJAX signaling endpoint.
+4. **Firestore Rules**: `firestore.rules` allows reads and writes for ephemeral transfer signaling and rate limit records.
+
+---
 
 ## Local Development
 
 ```bash
-# Using any static server
-npx serve .
-
-# Or Python
-python3 -m http.server 8000
-
-# Then open http://localhost:8000
-```
-
-## Firebase Security (Production)
-
-Update `firestore.rules` for production:
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /transfers/{code} {
-      // Only allow transfers less than 24 hours old
-      allow read, write: if request.time > timestamp.date(2024, 1, 1);
-      
-      match /offers/{offerId} {
-        allow read, write: if request.time > timestamp.date(2024, 1, 1);
-      }
-      match /answers/{answerId} {
-        allow read, write: if request.time > timestamp.date(2024, 1, 1);
-      }
-      match /candidates/{offerId} {
-        allow read, write: if request.time > timestamp.date(2024, 1, 1);
-      }
-    }
-  }
-}
-```
-
-## Architecture
-
-```
-┌─────────────┐                    ┌─────────────┐
-│    Sender   │ ←── WebRTC ───→ │  Receiver   │
-│             │                    │             │
-└──────┬──────┘                    └──────┬──────┘
-       │                                  │
-       └──────── Firebase Firestore ──────┘
-              (Signaling only)
-```
-
-- **Firebase**: Stores only signaling data (offers, answers, ICE candidates)
-- **WebRTC**: Direct P2P transfer - files never touch Firebase
-- **Chunk Size**: 64KB for optimal performance
-- **Auto-cleanup**: Transfers deleted after completion
-
-## Browser Support
-
-| Browser | Version |
-|---------|---------|
-| Chrome  | 76+ |
-| Firefox | 68+ |
-| Safari  | 14.1+ |
-| Edge    | 79+ |
-
-## Tech Stack
-
-- **Frontend**: Vanilla JavaScript, CSS (no frameworks)
-- **Backend**: Firebase Firestore (signaling only)
-- **Protocol**: WebRTC Data Channels
-- **Deployment**: Netlify
-
-## File Limits
-
-| Metric | Limit |
-|--------|-------|
-| File Size | None (P2P streaming) |
-| Code Validity | 24 hours |
-| Transfer Duration | Until complete |
-
-## Commands
-
-```bash
-# Install dependencies
+# 1. Install dependencies
 npm install
 
-# Start local server
-npx serve .
+# 2. Configure environment variables
+# Copy .env.example to .env.local and add your Firebase credentials
+cp .env.example .env.local
 
-# Deploy to Netlify
-netlify deploy --prod --site=YOUR_SITE_ID
+# 3. Build environment configuration & start development server
+npm run dev
+
+# 4. Run automated test suite
+npm test
 ```
+
+---
+
+## Production Deployment (Netlify)
+
+1. Connect your repository to Netlify.
+2. Under **Site Settings → Environment Variables**, add your Firebase keys:
+   - `FIREBASE_API_KEY`
+   - `FIREBASE_AUTH_DOMAIN`
+   - `FIREBASE_PROJECT_ID`
+   - `FIREBASE_STORAGE_BUCKET`
+   - `FIREBASE_MESSAGING_SENDER_ID`
+   - `FIREBASE_APP_ID`
+   - `FIREBASE_MEASUREMENT_ID`
+3. Netlify automatically runs `node inject-env.js` during build as configured in `netlify.toml`.
+
+---
+
+## Security
+
+- **End-to-End Encrypted**: WebRTC DataChannels are encrypted by default with DTLS (Datagram Transport Layer Security).
+- **Ephemeral Storage**: Signaling sessions and transfer codes expire automatically after 24 hours.
+- **Zero Server Storage**: Files never upload to any server or cloud database.
+
+---
 
 ## License
 

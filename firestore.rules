@@ -1,13 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Transfers collection - public for signaling
+    // Transfers collection - ephemeral signaling for WebRTC
     match /transfers/{code} {
-      // Anyone can read/write transfers
-      // Data is ephemeral (auto-deleted after transfer)
       allow read, write: if true;
 
-      // Subcollections for WebRTC signaling
       match /offers/{offerId} {
         allow read, write: if true;
       }
@@ -19,8 +16,13 @@ service cloud.firestore {
       }
     }
 
-    // Analytics (optional)
-    match /analytics/{document} {
+    // Rate limiting records
+    match /rate_limits/{limitId} {
+      allow read, write: if true;
+    }
+
+    // Default deny for unlisted collections
+    match /{document=**} {
       allow read, write: if false;
     }
   }

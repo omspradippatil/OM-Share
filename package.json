@@ -1,0 +1,25 @@
+{
+  "name": "om-share",
+  "version": "1.0.0",
+  "description": "Peer-to-peer file transfer with no size limits. Built with WebRTC, Firebase, and AJAX fallback.",
+  "main": "js/app.js",
+  "scripts": {
+    "dev": "node inject-env.js && npx serve .",
+    "build": "node inject-env.js",
+    "serve": "npx serve .",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "p2p",
+    "webrtc",
+    "file-transfer",
+    "firebase",
+    "firestore",
+    "ajax"
+  ],
+  "author": "OmShare",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

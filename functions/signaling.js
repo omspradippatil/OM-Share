@@ -142,7 +142,7 @@ exports.handler = async function(event, context) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
       }
 
-      session.candidates.push({ from: peerId, to, candidate, timestamp: Date.now() });
+      session.candidates.push({ from: peerId, to: to || '', candidate, timestamp: Date.now() });
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
     }
 
@@ -152,15 +152,10 @@ exports.handler = async function(event, context) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
       }
 
-      // Filter offers/answers/candidates intended for this peerId
-      const offers = session.offers.filter(o => !o.to || o.to === peerId);
-      const answers = session.answers.filter(a => !a.to || a.to === peerId);
-      const candidates = session.candidates.filter(c => !c.to || c.to === peerId);
-
-      // Remove returned items so they aren't processed twice
-      session.offers = session.offers.filter(o => o.to && o.to !== peerId);
-      session.answers = session.answers.filter(a => a.to && a.to !== peerId);
-      session.candidates = session.candidates.filter(c => c.to && c.to !== peerId);
+      // Return items meant for this peer from the other peer
+      const offers = session.offers.filter(o => o.from !== peerId && (!o.to || o.to === peerId));
+      const answers = session.answers.filter(a => a.from !== peerId && (!a.to || a.to === peerId));
+      const candidates = session.candidates.filter(c => c.from !== peerId && (!c.to || c.to === peerId));
 
       return {
         statusCode: 200,

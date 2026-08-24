@@ -27,27 +27,48 @@
     return '';
   }
 
-  const defaultStuns = [
-    'stun:stun.l.google.com:19302',
-    'stun:stun1.l.google.com:19302',
-    'stun:stun2.l.google.com:19302',
-    'stun:stun.cloudflare.com:3478',
-    'stun:stun.services.mozilla.com:3478'
-  ].join(',');
+  const defaultIceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.services.mozilla.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    // OpenRelay Public TURN servers for universal NAT & firewall traversal
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelay',
+      credential: 'openrelay'
+    }
+  ];
 
-  const stunUrls = (getEnvVar('STUN_SERVERS') || defaultStuns)
+  const customStuns = (getEnvVar('STUN_SERVERS') || '')
     .split(',')
     .map(url => url.trim())
     .filter(Boolean)
     .map(url => ({ urls: url }));
 
-  const turnUrls = (getEnvVar('TURN_SERVERS') || '')
+  const customTurns = (getEnvVar('TURN_SERVERS') || '')
     .split(',')
     .map(url => url.trim())
     .filter(Boolean)
     .map(url => ({ urls: url }));
 
-  const iceServers = [...stunUrls, ...turnUrls];
+  const iceServers = customStuns.length > 0 || customTurns.length > 0 
+    ? [...customStuns, ...customTurns] 
+    : defaultIceServers;
 
   const firebaseConfig = {
     apiKey: getEnvVar('FIREBASE_API_KEY'),

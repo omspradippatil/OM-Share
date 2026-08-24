@@ -334,19 +334,22 @@
      * Batched ICE candidate transmission for minimal network overhead
      */
     sendCandidate(code, peerId, to, isSender, candidate) {
+      if (!candidate) return;
       const candJson = candidate.toJSON ? candidate.toJSON() : candidate;
+      if (!candJson || (!candJson.candidate && candJson.candidate !== '')) return;
+
       this.candidateBatchQueue.push(candJson);
 
       if (this.candidateBatchTimer) return;
 
-      // Batch candidates in 30ms window
+      // Batch candidates in 25ms window
       this.candidateBatchTimer = setTimeout(async () => {
         this.candidateBatchTimer = null;
         const batch = [...this.candidateBatchQueue];
         this.candidateBatchQueue = [];
         if (batch.length === 0) return;
 
-        if (!this.useAjaxFallback && this.firebaseInitialized && typeof firebase !== 'undefined') {
+        if (!this.useAjaxFallback && this.firebaseInitialized && typeof firebase !== 'undefined' && this.db) {
           try {
             const fieldName = isSender ? 'senderCandidates' : 'receiverCandidates';
             const transferDoc = this.db.collection('transfers').doc(code);
@@ -365,11 +368,11 @@
             action: 'candidate',
             code,
             peerId,
-            to,
+            to: to || '',
             candidate: c
           }).catch(() => {});
         }
-      }, 30);
+      }, 25);
     }
 
     /**

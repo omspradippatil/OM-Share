@@ -193,8 +193,22 @@
       const pc = new RTCPeerConnection(pcConfig);
 
       pc.onicecandidate = (event) => {
-        if (event.candidate && this.code) {
+        if (event.candidate && event.candidate.candidate && this.code) {
           this.signaling.sendCandidate(this.code, this.peerId, targetPeerId, isSender, event.candidate);
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        console.log('[WebRTC] Connection State:', state);
+
+        if (state === 'connected') {
+          this.emit('connected');
+        } else if (state === 'failed') {
+          console.warn('[WebRTC] Connection state failed, attempting ICE restart...');
+          try { pc.restartIce(); } catch (e) {}
+        } else if (state === 'disconnected') {
+          this.emit('status', 'Reconnecting peer...');
         }
       };
 
@@ -205,10 +219,10 @@
         if (state === 'connected' || state === 'completed') {
           this.emit('connected');
         } else if (state === 'failed') {
-          console.warn('[WebRTC] Connection failed, attempting ICE restart...');
-          pc.restartIce();
+          console.warn('[WebRTC] ICE failed, restarting ICE...');
+          try { pc.restartIce(); } catch (e) {}
         } else if (state === 'disconnected') {
-          this.emit('status', 'Connection temporarily interrupted...');
+          this.emit('status', 'Reconnecting peer...');
         }
       };
 
@@ -221,25 +235,38 @@
     async addOrQueueCandidate(candidateData) {
       if (!candidateData) return;
 
-      if (!this.peerConnection || !this.peerConnection.remoteDescription) {
-        this.pendingCandidates.push(candidateData);
+      let candObj = candidateData;
+      if (typeof candidateData === 'string') {
+        try {
+          candObj = JSON.parse(candidateData);
+        } catch (e) {
+          candObj = { candidate: candidateData };
+        }
+      }
+
+      if (!candObj || (!candObj.candidate && candObj.candidate !== '')) return;
+
+      if (!this.peerConnection || !this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) {
+        this.pendingCandidates.push(candObj);
         return;
       }
 
       try {
-        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candObj));
       } catch (e) {
-        console.warn('[WebRTC] Candidate error:', e.message);
+        console.warn('[WebRTC] Error adding ICE candidate:', e.message);
       }
     }
 
     async flushPendingCandidates() {
-      if (!this.peerConnection || !this.peerConnection.remoteDescription) return;
+      if (!this.peerConnection || !this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) return;
       while (this.pendingCandidates.length > 0) {
         const cand = this.pendingCandidates.shift();
         try {
           await this.peerConnection.addIceCandidate(new RTCIceCandidate(cand));
-        } catch (e) {}
+        } catch (e) {
+          console.warn('[WebRTC] Error flushing candidate:', e.message);
+        }
       }
     }
 

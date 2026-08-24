@@ -5,4 +5,4 @@ Disallow: /api/
 Disallow: /.netlify/
 
 # Sitemaps
-Sitemap: https://omshare.app/sitemap.xml
+Sitemap: https://omshare.netlify.app/sitemap.xml

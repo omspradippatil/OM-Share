@@ -32,7 +32,7 @@
     "author": "OM Patil",
     "language": "en",
     "robots": "index, follow",
-    "canonical": "https://omshare.app/",
+    "canonical": "https://omshare.netlify.app/",
     "pages": [
       {
         "path": "/",
@@ -72,7 +72,7 @@
       "locale": "en_US",
       "siteName": "OmShare",
       "image": {
-        "url": "https://omshare.app/icon-512.svg",
+        "url": "https://omshare.netlify.app/icon-512.svg",
         "width": 512,
         "height": 512,
         "type": "image/svg+xml"
@@ -81,15 +81,15 @@
     "twitter": {
       "card": "summary_large_image",
       "creator": "@omshare",
-      "image": "https://omshare.app/icon-512.svg"
+      "image": "https://omshare.netlify.app/icon-512.svg"
     },
     "schema": {
       "organization": {
         "@context": "https://schema.org",
         "@type": "Organization",
         "name": "OmShare",
-        "url": "https://omshare.app",
-        "logo": "https://omshare.app/icon-512.svg",
+        "url": "https://omshare.netlify.app",
+        "logo": "https://omshare.netlify.app/icon-512.svg",
         "founder": {
           "@type": "Person",
           "name": "OM Patil",
@@ -106,7 +106,7 @@
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "OmShare",
-        "url": "https://omshare.app",
+        "url": "https://omshare.netlify.app",
         "description": "Free peer-to-peer file transfer with no size limits",
         "applicationCategory": "UtilitiesApplication",
         "operatingSystem": "Any",

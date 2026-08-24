@@ -30,14 +30,16 @@
     CLEANUP_INTERVAL: 60 * 60 * 1000 // 1 hour
   };
 
-  // Firebase Configuration (Replace with your own)
+  // Firebase Configuration (from Netlify environment variables)
+  // On Netlify, these are set as FIREBASE_* env vars and injected at deploy time
   const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: window.FIREBASE_API_KEY || "YOUR_API_KEY",
+    authDomain: window.FIREBASE_AUTH_DOMAIN || "YOUR_PROJECT.firebaseapp.com",
+    projectId: window.FIREBASE_PROJECT_ID || "YOUR_PROJECT_ID",
+    storageBucket: window.FIREBASE_STORAGE_BUCKET || "YOUR_PROJECT.appspot.com",
+    messagingSenderId: window.FIREBASE_MESSAGING_SENDER_ID || "YOUR_SENDER_ID",
+    appId: window.FIREBASE_APP_ID || "YOUR_APP_ID",
+    measurementId: window.FIREBASE_MEASUREMENT_ID
   };
 
   // Initialize Firebase

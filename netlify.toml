@@ -1,5 +1,5 @@
 [build]
-  command = "echo 'Build complete - static site'"
+  command = "node inject-env.js"
   publish = "."
 
 [build.environment]

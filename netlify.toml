@@ -42,7 +42,7 @@
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "geolocation=(), microphone=(), camera=(), payment=()"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
     # CSP - Content Security Policy (allows Firestore API, Google Fonts, WebSockets, STUN/TURN, and Source Maps)
     Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://*.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.gstatic.com https://www.gstatic.com https://firestore.googleapis.com https://*.googleapis.com https://firebase.googleapis.com https://*.firebaseio.com https://*.firebase.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https: wss:; manifest-src 'self'"

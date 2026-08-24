@@ -105,9 +105,7 @@
     ICE_SERVERS: iceServers.length > 0 ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }],
     RTC_PEER_CONFIG: {
       iceServers: iceServers.length > 0 ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }],
-      iceCandidatePoolSize: 10,
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
+      iceCandidatePoolSize: 5
     },
 
     // Rate Limiting

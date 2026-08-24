@@ -119,10 +119,15 @@
           await this.handleReceiverJoined(receiverId);
         },
         onAnswer: async (answer) => {
-          if (this.peerConnection && this.peerConnection.signalingState !== 'stable') {
-            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            await this.flushPendingCandidates();
-            console.log(`[WebRTC] Remote answer applied in ${(Date.now() - this.startTime)}ms`);
+          try {
+            if (this.peerConnection && this.peerConnection.signalingState !== 'stable') {
+              const sdpInit = { type: answer.type || 'answer', sdp: answer.sdp };
+              await this.peerConnection.setRemoteDescription(new RTCSessionDescription(sdpInit));
+              await this.flushPendingCandidates();
+              console.log(`[WebRTC] Remote answer applied in ${(Date.now() - this.startTime)}ms`);
+            }
+          } catch (err) {
+            console.error('[WebRTC] Error setting remote answer:', err);
           }
         },
         onCandidate: async (candidateData) => {
@@ -137,20 +142,25 @@
      * Sender generates Offer and dispatches to receiver
      */
     async handleReceiverJoined(receiverId) {
-      this.peerConnection = this.createPeerConnection(receiverId, true);
+      try {
+        this.peerConnection = this.createPeerConnection(receiverId, true);
 
-      // Create DataChannel with low latency ordered delivery
-      this.dataChannel = this.peerConnection.createDataChannel('omshare-transfer', {
-        ordered: true
-      });
-      this.setupDataChannel();
+        // Create DataChannel with low latency ordered delivery
+        this.dataChannel = this.peerConnection.createDataChannel('omshare-transfer', {
+          ordered: true
+        });
+        this.setupDataChannel();
 
-      // Create and set local Offer
-      const offer = await this.peerConnection.createOffer();
-      await this.peerConnection.setLocalDescription(offer);
+        // Create and set local Offer
+        const offer = await this.peerConnection.createOffer();
+        await this.peerConnection.setLocalDescription(offer);
 
-      // Transmit offer immediately
-      await this.signaling.sendOffer(this.code, this.peerId, receiverId, offer);
+        // Transmit offer immediately
+        await this.signaling.sendOffer(this.code, this.peerId, receiverId, offer);
+        console.log(`[WebRTC] Offer generated and sent to receiver ${receiverId}`);
+      } catch (err) {
+        console.error('[WebRTC] Error in handleReceiverJoined:', err);
+      }
     }
 
     /**
@@ -173,7 +183,7 @@
       this.peerConnection = this.createPeerConnection(senderId, false);
 
       this.peerConnection.ondatachannel = (event) => {
-        console.log('[WebRTC] Receiver received data channel');
+        console.log('[WebRTC] Receiver received DataChannel');
         this.dataChannel = event.channel;
         this.setupDataChannel();
       };
@@ -181,15 +191,21 @@
       // Listen for Offer and ICE candidates in real-time
       this.signaling.listenSession(this.code, false, this.peerId, {
         onOffer: async (offer) => {
-          if (this.peerConnection && this.peerConnection.signalingState !== 'closed') {
-            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-            await this.flushPendingCandidates();
+          try {
+            if (this.peerConnection && this.peerConnection.signalingState !== 'closed') {
+              console.log('[WebRTC] Receiver received offer, applying...');
+              const sdpInit = { type: offer.type || 'offer', sdp: offer.sdp };
+              await this.peerConnection.setRemoteDescription(new RTCSessionDescription(sdpInit));
+              await this.flushPendingCandidates();
 
-            const answer = await this.peerConnection.createAnswer();
-            await this.peerConnection.setLocalDescription(answer);
+              const answer = await this.peerConnection.createAnswer();
+              await this.peerConnection.setLocalDescription(answer);
 
-            await this.signaling.sendAnswer(this.code, this.peerId, senderId, answer);
-            console.log(`[WebRTC] Answer dispatched in ${(Date.now() - this.startTime)}ms`);
+              await this.signaling.sendAnswer(this.code, this.peerId, senderId, answer);
+              console.log(`[WebRTC] Answer dispatched in ${(Date.now() - this.startTime)}ms`);
+            }
+          } catch (err) {
+            console.error('[WebRTC] Error processing offer:', err);
           }
         },
         onCandidate: async (candidateData) => {
@@ -206,9 +222,7 @@
     createPeerConnection(targetPeerId, isSender) {
       const pcConfig = CONFIG.RTC_PEER_CONFIG || {
         iceServers: CONFIG.ICE_SERVERS,
-        iceCandidatePoolSize: 10,
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require'
+        iceCandidatePoolSize: 5
       };
 
       const pc = new RTCPeerConnection(pcConfig);

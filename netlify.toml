@@ -129,9 +129,9 @@
 
 [context.production]
   command = "node inject-env.js"
-  environment = { NODE_ENV = "production" }
 
 [context.production.environment]
+  NODE_ENV = "production"
   GZIP = "true"
   BROTLI = "true"
 

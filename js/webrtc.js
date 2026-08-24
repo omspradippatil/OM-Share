@@ -21,6 +21,26 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
+  function cleanCandidate(cand) {
+    if (!cand) return null;
+    const raw = cand.toJSON ? cand.toJSON() : cand;
+    if (!raw || !raw.candidate) return null;
+
+    const out = {
+      candidate: String(raw.candidate)
+    };
+    if (raw.sdpMid !== undefined && raw.sdpMid !== null) {
+      out.sdpMid = String(raw.sdpMid);
+    }
+    if (raw.sdpMLineIndex !== undefined && raw.sdpMLineIndex !== null) {
+      out.sdpMLineIndex = Number(raw.sdpMLineIndex);
+    }
+    if (raw.usernameFragment !== undefined && raw.usernameFragment !== null) {
+      out.usernameFragment = String(raw.usernameFragment);
+    }
+    return out;
+  }
+
   class WebRTCConnectionManager {
     constructor() {
       this.signaling = new HybridSignaling();
@@ -89,9 +109,9 @@
       };
 
       const result = await this.signaling.createTransfer(this.code, this.peerId, this.fileInfo, this.clientIP);
-      console.log(`[WebRTC] Transfer created with code ${this.code} (${result.mode})`);
+      console.log(`[WebRTC] Transfer session ready: code ${this.code} (${result.mode})`);
 
-      // Start unified real-time stream listener for instant receiver detection
+      // Real-time single-doc listener for instant receiver join and answer
       this.signaling.listenSession(this.code, true, this.peerId, {
         onReceiverJoined: async (receiverId) => {
           console.log(`[WebRTC] Receiver ${receiverId} joined in ${(Date.now() - this.startTime)}ms. Starting handshake.`);
@@ -153,6 +173,7 @@
       this.peerConnection = this.createPeerConnection(senderId, false);
 
       this.peerConnection.ondatachannel = (event) => {
+        console.log('[WebRTC] Receiver received data channel');
         this.dataChannel = event.channel;
         this.setupDataChannel();
       };
@@ -180,7 +201,7 @@
     }
 
     /**
-     * Creates and configures RTCPeerConnection with fast ICE pooling
+     * Creates and configures RTCPeerConnection with fast ICE pooling & TURN fallback
      */
     createPeerConnection(targetPeerId, isSender) {
       const pcConfig = CONFIG.RTC_PEER_CONFIG || {
@@ -235,16 +256,8 @@
     async addOrQueueCandidate(candidateData) {
       if (!candidateData) return;
 
-      let candObj = candidateData;
-      if (typeof candidateData === 'string') {
-        try {
-          candObj = JSON.parse(candidateData);
-        } catch (e) {
-          candObj = { candidate: candidateData };
-        }
-      }
-
-      if (!candObj || (!candObj.candidate && candObj.candidate !== '')) return;
+      const candObj = cleanCandidate(candidateData);
+      if (!candObj || !candObj.candidate) return;
 
       if (!this.peerConnection || !this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) {
         this.pendingCandidates.push(candObj);
@@ -254,7 +267,7 @@
       try {
         await this.peerConnection.addIceCandidate(new RTCIceCandidate(candObj));
       } catch (e) {
-        console.warn('[WebRTC] Error adding ICE candidate:', e.message);
+        console.warn('[WebRTC] Candidate add warning:', e.message);
       }
     }
 
@@ -265,7 +278,7 @@
         try {
           await this.peerConnection.addIceCandidate(new RTCIceCandidate(cand));
         } catch (e) {
-          console.warn('[WebRTC] Error flushing candidate:', e.message);
+          console.warn('[WebRTC] Flushing candidate warning:', e.message);
         }
       }
     }

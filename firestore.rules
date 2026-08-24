@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Transfers collection - public for signaling
+    match /transfers/{code} {
+      // Anyone can read/write transfers
+      // Data is ephemeral (auto-deleted after transfer)
+      allow read, write: if true;
+
+      // Subcollections for WebRTC signaling
+      match /offers/{offerId} {
+        allow read, write: if true;
+      }
+      match /answers/{answerId} {
+        allow read, write: if true;
+      }
+      match /candidates/{candidateId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Analytics (optional)
+    match /analytics/{document} {
+      allow read, write: if false;
+    }
+  }
+}

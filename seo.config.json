@@ -1,0 +1,185 @@
+{
+  "seo": {
+    "title": "OmShare - Free P2P File Transfer | Send Large Files Instantly",
+    "description": "Send files of any size instantly with OmShare. Peer-to-peer file sharing with no sign-up, no server storage, and no file size limits. Secure, fast, and completely free.",
+    "keywords": [
+      "file transfer",
+      "send large files",
+      "peer to peer",
+      "p2p file sharing",
+      "free file transfer",
+      "no size limit",
+      "secure file sharing",
+      "instant file transfer",
+      "WebRTC",
+      "direct file transfer",
+      "share files online",
+      "file sharing app",
+      "online file transfer",
+      "cloud file transfer",
+      "file sharing service",
+      "fast file transfer",
+      "encrypted file transfer",
+      "anonymous file sharing",
+      "no registration file transfer",
+      "desktop file transfer",
+      "mobile file transfer",
+      "cross platform file transfer",
+      "browser file transfer",
+      "p2p transfer",
+      "direct transfer"
+    ],
+    "author": "OmShare",
+    "language": "en",
+    "robots": "index, follow",
+    "canonical": "https://omshare.app/",
+    "pages": [
+      {
+        "path": "/",
+        "title": "OmShare - Free P2P File Transfer | Send Large Files Instantly",
+        "description": "Send files of any size instantly with OmShare. Peer-to-peer file sharing with no sign-up, no server storage, and no file size limits.",
+        "keywords": "file transfer, p2p, peer to peer, free file sharing, no size limit",
+        "priority": 1.0,
+        "changefreq": "weekly"
+      },
+      {
+        "path": "/how-it-works",
+        "title": "How OmShare Works - Free P2P File Transfer Guide",
+        "description": "Learn how OmShare works: secure peer-to-peer file transfer, no sign-up, unlimited file size. Get started in seconds with our simple 6-digit code system.",
+        "keywords": "how file transfer works, p2p file sharing, WebRTC, secure file sharing",
+        "priority": 0.9,
+        "changefreq": "monthly"
+      },
+      {
+        "path": "/privacy",
+        "title": "Privacy Policy - OmShare",
+        "description": "OmShare privacy policy: We don't store files, don't track users, and don't collect personal data. Your transfers are completely private.",
+        "keywords": "privacy policy, data protection, file privacy",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      },
+      {
+        "path": "/terms",
+        "title": "Terms of Service - OmShare",
+        "description": "OmShare terms of service: free peer-to-peer file transfer service. Read our terms for usage, limitations, and disclaimers.",
+        "keywords": "terms of service, terms and conditions, legal",
+        "priority": 0.7,
+        "changefreq": "yearly"
+      }
+    ],
+    "openGraph": {
+      "type": "website",
+      "locale": "en_US",
+      "siteName": "OmShare",
+      "image": {
+        "url": "https://omshare.app/og-image.png",
+        "width": 1200,
+        "height": 630,
+        "type": "image/png"
+      }
+    },
+    "twitter": {
+      "card": "summary_large_image",
+      "creator": "@omshare",
+      "image": "https://omshare.app/twitter-image.png"
+    },
+    "schema": {
+      "organization": {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "OmShare",
+        "url": "https://omshare.app",
+        "logo": "https://omshare.app/icon-512.svg",
+        "description": "Free peer-to-peer file transfer service",
+        "sameAs": [
+          "https://twitter.com/omshare",
+          "https://github.com/omshare"
+        ]
+      },
+      "application": {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "OmShare",
+        "url": "https://omshare.app",
+        "description": "Free peer-to-peer file transfer with no size limits",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Any",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Unlimited file size",
+          "No sign-up required",
+          "Peer-to-peer transfer",
+          "End-to-end encrypted",
+          "No server storage",
+          "Instant sharing"
+        ]
+      },
+      "faq": {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is OmShare free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, OmShare is completely free. There are no subscription fees, hidden costs, or premium tiers."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is the file size limit?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "OmShare has no file size limits. You can transfer files from kilobytes to gigabytes depending on your browser memory and internet connection."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to create an account?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No, OmShare requires no sign-up or account creation. Just select a file and get a code."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is my file private?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, files transfer directly between browsers using encrypted connections. We never store file content on servers."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How long does a transfer code last?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Each 6-digit code expires after 24 hours. If no one connects within 24 hours, the code becomes invalid."
+            }
+          }
+        ]
+      }
+    }
+  },
+  "performance": {
+    "imageOptimization": true,
+    "caching": {
+      "static": "31536000",
+      "html": "3600",
+      "api": "0"
+    },
+    "compression": "gzip",
+    "minification": true
+  },
+  "security": {
+    "https": true,
+    "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://firebase.googleapis.com https://*.firebaseio.com",
+    "referrer": "strict-origin-when-cross-origin",
+    "permissions": "geolocation=(), microphone=(), camera=()"
+  }
+}

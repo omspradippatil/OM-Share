@@ -75,26 +75,24 @@
     const dayAgo = now - 86400000;
 
     // Check codes per hour
-    const hourlyCount = await db.collection('rate_limits')
+    const hourlySnapshot = await db.collection('rate_limits')
       .where('ip', '==', ipAddress)
       .where('type', '==', 'code')
       .where('timestamp', '>', hourAgo)
-      .count()
       .get();
 
-    if (hourlyCount.data().count >= CONFIG.RATE_LIMIT_CODES_PER_HOUR) {
+    if (hourlySnapshot.size >= CONFIG.RATE_LIMIT_CODES_PER_HOUR) {
       throw new Error('Rate limit exceeded: Too many codes created in the last hour');
     }
 
     // Check transfers per day
-    const dailyCount = await db.collection('rate_limits')
+    const dailySnapshot = await db.collection('rate_limits')
       .where('ip', '==', ipAddress)
       .where('type', '==', 'transfer')
       .where('timestamp', '>', dayAgo)
-      .count()
       .get();
 
-    if (dailyCount.data().count >= CONFIG.RATE_LIMIT_TRANSFERS_PER_DAY) {
+    if (dailySnapshot.size >= CONFIG.RATE_LIMIT_TRANSFERS_PER_DAY) {
       throw new Error('Rate limit exceeded: Too many transfers in the last 24 hours');
     }
 

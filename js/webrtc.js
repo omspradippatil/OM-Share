@@ -1,7 +1,7 @@
 /**
  * OmShare - WebRTC Peer Connection & Streaming Manager
- * Handles WebRTC data channel establishment, buffered chunk streaming with flow control,
- * and file assembly for unlimited size P2P transfers.
+ * Ultra-fast sub-second connection establishment with pre-gathered ICE pools,
+ * candidate queuing, and low-latency chunk streaming.
  */
 
 (function(root, factory) {
@@ -35,6 +35,7 @@
       this.startTime = null;
       this.clientIP = 'client-' + Math.random().toString(36).substr(2, 9);
       this.listeners = new Map();
+      this.pendingCandidates = [];
       this.isDestroyed = false;
     }
 
@@ -66,7 +67,7 @@
     }
 
     /**
-     * Start transfer as Sender
+     * Sender starts transfer session
      */
     async createTransfer(file) {
       if (!file) throw new Error('Please select a file to share.');
@@ -88,47 +89,52 @@
       };
 
       const result = await this.signaling.createTransfer(this.code, this.peerId, this.fileInfo, this.clientIP);
-      console.log(`[WebRTC] Transfer created with code ${this.code} (Mode: ${result.mode})`);
+      console.log(`[WebRTC] Transfer created with code ${this.code} (${result.mode})`);
 
-      // Listen for receiver to connect
-      this.signaling.listenForReceiver(this.code, async (receiverId) => {
-        console.log(`[WebRTC] Receiver ${receiverId} joined. Initiating WebRTC handshake.`);
-        this.emit('status', 'Receiver connected, establishing direct connection...');
-        await this.handleReceiverJoined(receiverId);
+      // Start unified real-time stream listener for instant receiver detection
+      this.signaling.listenSession(this.code, true, this.peerId, {
+        onReceiverJoined: async (receiverId) => {
+          console.log(`[WebRTC] Receiver ${receiverId} joined in ${(Date.now() - this.startTime)}ms. Starting handshake.`);
+          this.emit('status', 'Receiver connected. Establishing direct connection...');
+          await this.handleReceiverJoined(receiverId);
+        },
+        onAnswer: async (answer) => {
+          if (this.peerConnection && this.peerConnection.signalingState !== 'stable') {
+            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            await this.flushPendingCandidates();
+            console.log(`[WebRTC] Remote answer applied in ${(Date.now() - this.startTime)}ms`);
+          }
+        },
+        onCandidate: async (candidateData) => {
+          await this.addOrQueueCandidate(candidateData);
+        }
       });
 
       return this.code;
     }
 
     /**
-     * Handle receiver joining - Sender creates offer and sends to receiver
+     * Sender generates Offer and dispatches to receiver
      */
     async handleReceiverJoined(receiverId) {
-      this.peerConnection = this.createPeerConnection(receiverId);
+      this.peerConnection = this.createPeerConnection(receiverId, true);
 
-      // Create reliable data channel for file transfer
+      // Create DataChannel with low latency ordered delivery
       this.dataChannel = this.peerConnection.createDataChannel('omshare-transfer', {
         ordered: true
       });
       this.setupDataChannel();
 
-      // Create Offer
+      // Create and set local Offer
       const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
 
+      // Transmit offer immediately
       await this.signaling.sendOffer(this.code, this.peerId, receiverId, offer);
-
-      // Listen for Answer
-      this.signaling.listenForAnswers(this.code, this.peerId, async (answer) => {
-        if (this.peerConnection && this.peerConnection.signalingState !== 'stable') {
-          await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-          console.log('[WebRTC] Remote answer set successfully');
-        }
-      });
     }
 
     /**
-     * Join transfer as Receiver
+     * Receiver joins transfer session
      */
     async joinTransfer(code) {
       if (!code || code.length !== 6) {
@@ -143,22 +149,30 @@
       this.fileInfo = session.fileInfo;
       const senderId = session.senderId;
 
-      this.peerConnection = this.createPeerConnection(senderId);
+      // Pre-warm RTCPeerConnection immediately with pre-gathered ICE candidates
+      this.peerConnection = this.createPeerConnection(senderId, false);
 
-      // Receiver listens for data channel created by sender
       this.peerConnection.ondatachannel = (event) => {
         this.dataChannel = event.channel;
         this.setupDataChannel();
       };
 
-      // Listen for Offer from sender
-      this.signaling.listenForOffers(this.code, this.peerId, async (offer) => {
-        if (this.peerConnection) {
-          await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await this.peerConnection.createAnswer();
-          await this.peerConnection.setLocalDescription(answer);
-          await this.signaling.sendAnswer(this.code, this.peerId, senderId, answer);
-          console.log('[WebRTC] Remote offer processed, answer sent');
+      // Listen for Offer and ICE candidates in real-time
+      this.signaling.listenSession(this.code, false, this.peerId, {
+        onOffer: async (offer) => {
+          if (this.peerConnection && this.peerConnection.signalingState !== 'closed') {
+            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            await this.flushPendingCandidates();
+
+            const answer = await this.peerConnection.createAnswer();
+            await this.peerConnection.setLocalDescription(answer);
+
+            await this.signaling.sendAnswer(this.code, this.peerId, senderId, answer);
+            console.log(`[WebRTC] Answer dispatched in ${(Date.now() - this.startTime)}ms`);
+          }
+        },
+        onCandidate: async (candidateData) => {
+          await this.addOrQueueCandidate(candidateData);
         }
       });
 
@@ -166,29 +180,23 @@
     }
 
     /**
-     * Creates and configures RTCPeerConnection
+     * Creates and configures RTCPeerConnection with fast ICE pooling
      */
-    createPeerConnection(targetPeerId) {
-      const pc = new RTCPeerConnection({
-        iceServers: CONFIG.ICE_SERVERS
-      });
+    createPeerConnection(targetPeerId, isSender) {
+      const pcConfig = CONFIG.RTC_PEER_CONFIG || {
+        iceServers: CONFIG.ICE_SERVERS,
+        iceCandidatePoolSize: 10,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require'
+      };
+
+      const pc = new RTCPeerConnection(pcConfig);
 
       pc.onicecandidate = (event) => {
         if (event.candidate && this.code) {
-          this.signaling.sendCandidate(this.code, this.peerId, targetPeerId, event.candidate);
+          this.signaling.sendCandidate(this.code, this.peerId, targetPeerId, isSender, event.candidate);
         }
       };
-
-      // Listen for incoming ICE candidates from peer
-      this.signaling.listenForCandidates(this.code, this.peerId, async (candidateData) => {
-        if (pc && candidateData) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(candidateData));
-          } catch (e) {
-            console.warn('[WebRTC] Error adding ICE candidate:', e);
-          }
-        }
-      });
 
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
@@ -197,7 +205,7 @@
         if (state === 'connected' || state === 'completed') {
           this.emit('connected');
         } else if (state === 'failed') {
-          this.emit('error', new Error('Peer connection failed. Retrying...'));
+          console.warn('[WebRTC] Connection failed, attempting ICE restart...');
           pc.restartIce();
         } else if (state === 'disconnected') {
           this.emit('status', 'Connection temporarily interrupted...');
@@ -208,6 +216,34 @@
     }
 
     /**
+     * Candidate queuing to eliminate race conditions
+     */
+    async addOrQueueCandidate(candidateData) {
+      if (!candidateData) return;
+
+      if (!this.peerConnection || !this.peerConnection.remoteDescription) {
+        this.pendingCandidates.push(candidateData);
+        return;
+      }
+
+      try {
+        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+      } catch (e) {
+        console.warn('[WebRTC] Candidate error:', e.message);
+      }
+    }
+
+    async flushPendingCandidates() {
+      if (!this.peerConnection || !this.peerConnection.remoteDescription) return;
+      while (this.pendingCandidates.length > 0) {
+        const cand = this.pendingCandidates.shift();
+        try {
+          await this.peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {}
+      }
+    }
+
+    /**
      * Sets up DataChannel event handlers and flow control
      */
     setupDataChannel() {
@@ -215,7 +251,8 @@
       this.dataChannel.binaryType = 'arraybuffer';
 
       this.dataChannel.onopen = () => {
-        console.log('[WebRTC] DataChannel opened');
+        const duration = this.startTime ? `${Date.now() - this.startTime}ms` : '';
+        console.log(`[WebRTC] DataChannel opened in ${duration}!`);
         this.emit('connected');
         if (this.isSender) {
           this.startStreamingFile();
@@ -305,14 +342,14 @@
 
         // Flow control: wait if buffer is full to prevent browser crash / packet loss
         while (this.dataChannel.bufferedAmount > BUFFER_THRESHOLD) {
-          await new Promise(res => setTimeout(res, 50));
+          await new Promise(res => setTimeout(res, 25));
         }
 
         const start = i * CONFIG.CHUNK_SIZE;
         const end = Math.min(start + CONFIG.CHUNK_SIZE, this.file.size);
         const slice = this.file.slice(start, end);
 
-        // Read chunk as ArrayBuffer on demand (low memory footprint)
+        // Read chunk as ArrayBuffer on demand
         const arrayBuffer = await slice.arrayBuffer();
 
         // Send header then binary payload
@@ -391,6 +428,7 @@
         this.peerConnection = null;
       }
       this.receivedChunks.clear();
+      this.pendingCandidates = [];
     }
   }
 

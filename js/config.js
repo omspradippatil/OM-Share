@@ -27,7 +27,15 @@
     return '';
   }
 
-  const stunUrls = (getEnvVar('STUN_SERVERS') || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun2.l.google.com:19302')
+  const defaultStuns = [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun2.l.google.com:19302',
+    'stun:stun.cloudflare.com:3478',
+    'stun:stun.services.mozilla.com:3478'
+  ].join(',');
+
+  const stunUrls = (getEnvVar('STUN_SERVERS') || defaultStuns)
     .split(',')
     .map(url => url.trim())
     .filter(Boolean)
@@ -74,6 +82,12 @@
     CODE_EXPIRY: parseInt(getEnvVar('CODE_EXPIRY'), 10) || 24 * 60 * 60 * 1000, // 24 hours
     MAX_TRANSFER_DURATION: 2 * 60 * 60 * 1000, // 2 hours
     ICE_SERVERS: iceServers.length > 0 ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }],
+    RTC_PEER_CONFIG: {
+      iceServers: iceServers.length > 0 ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceCandidatePoolSize: 10,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
+    },
 
     // Rate Limiting
     RATE_LIMIT_CODES_PER_HOUR: 10,

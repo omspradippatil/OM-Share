@@ -1,7 +1,7 @@
 /**
- * OmShare - Hybrid Signaling Manager
- * Seamlessly manages WebRTC signaling via Firebase Firestore (primary)
- * and AJAX Serverless REST endpoints (fallback), handling offline errors and network transitions.
+ * OmShare - Hybrid Ultra-Fast Signaling Manager
+ * Real-time sub-second WebRTC signaling via single-document Firestore streams (primary)
+ * and low-latency AJAX micro-polling (fallback).
  */
 
 (function(root, factory) {
@@ -20,7 +20,9 @@
       this.useAjaxFallback = false;
       this.activePollingInterval = null;
       this.unsubscribers = [];
-      this.mode = 'auto'; // 'firebase' | 'ajax' | 'auto'
+      this.processedCandidateKeys = new Set();
+      this.candidateBatchQueue = [];
+      this.candidateBatchTimer = null;
 
       this.initFirebase();
       this.bindNetworkEvents();
@@ -37,7 +39,7 @@
       }
 
       if (!CONFIG.isFirebaseConfigured()) {
-        console.warn('[Signaling] Firebase is not configured with real API keys. Falling back to AJAX signaling mode.');
+        console.warn('[Signaling] Firebase not configured with real credentials. Using fast AJAX signaling.');
         this.useAjaxFallback = true;
         return;
       }
@@ -48,7 +50,7 @@
         }
         this.db = firebase.firestore();
         this.firebaseInitialized = true;
-        console.log('[Signaling] Firebase Firestore initialized successfully');
+        console.log('[Signaling] Firebase Firestore initialized in real-time mode');
       } catch (err) {
         console.warn('[Signaling] Firebase initialization error:', err.message);
         this.useAjaxFallback = true;
@@ -56,36 +58,26 @@
     }
 
     /**
-     * Listens to browser online/offline events and controls Firestore network state
+     * Listens to browser network state
      */
     bindNetworkEvents() {
       if (typeof window === 'undefined') return;
 
       window.addEventListener('online', async () => {
-        console.log('[Signaling] Network back online');
         if (this.db) {
-          try {
-            await this.db.enableNetwork();
-          } catch (e) {
-            console.warn('[Signaling] enableNetwork error:', e.message);
-          }
+          try { await this.db.enableNetwork(); } catch (e) {}
         }
       });
 
       window.addEventListener('offline', async () => {
-        console.warn('[Signaling] Network is offline');
         if (this.db) {
-          try {
-            await this.db.disableNetwork();
-          } catch (e) {
-            console.warn('[Signaling] disableNetwork error:', e.message);
-          }
+          try { await this.db.disableNetwork(); } catch (e) {}
         }
       });
     }
 
     /**
-     * Creates a new transfer session
+     * Creates a new transfer session document
      */
     async createTransfer(code, peerId, fileInfo, clientIP) {
       if (!this.useAjaxFallback && this.firebaseInitialized) {
@@ -94,6 +86,7 @@
           await transferDoc.set({
             code,
             senderId: peerId,
+            receiverId: null,
             fileName: fileInfo.name,
             fileSize: fileInfo.size,
             fileType: fileInfo.type || 'application/octet-stream',
@@ -101,12 +94,16 @@
             createdAt: Date.now(),
             expiresAt: Date.now() + CONFIG.CODE_EXPIRY,
             status: 'waiting',
+            offer: null,
+            answer: null,
+            senderCandidates: [],
+            receiverCandidates: [],
             clientIP: clientIP || 'unknown'
           });
 
           return { mode: 'firebase', code };
         } catch (err) {
-          console.warn('[Signaling] Firestore createTransfer failed (offline/blocked), falling back to AJAX:', err.message);
+          console.warn('[Signaling] Firestore createTransfer failed, switching to fast AJAX:', err.message);
           this.useAjaxFallback = true;
         }
       }
@@ -123,44 +120,6 @@
       } catch (ajaxErr) {
         throw new Error(`Failed to create transfer session: ${ajaxErr.message}`);
       }
-    }
-
-    /**
-     * Sender listens for receiver joining the transfer
-     */
-    listenForReceiver(code, callback) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
-        try {
-          const unsub = this.db.collection('transfers').doc(code).onSnapshot(
-            (snapshot) => {
-              const data = snapshot.data();
-              if (data && data.receiverId) {
-                callback(data.receiverId);
-              }
-            },
-            (error) => {
-              console.warn('[Signaling] Firestore receiver listener error:', error.message);
-              // Switch to polling if Firestore snapshot fails
-              this.startPolling(code, 'sender', (pollData) => {
-                if (pollData && pollData.receiverId) {
-                  callback(pollData.receiverId);
-                }
-              });
-            }
-          );
-          this.unsubscribers.push(unsub);
-          return;
-        } catch (e) {
-          console.warn('[Signaling] Snapshot error, falling back to polling:', e.message);
-        }
-      }
-
-      // Polling fallback
-      this.startPolling(code, 'sender', (pollData) => {
-        if (pollData && pollData.receiverId) {
-          callback(pollData.receiverId);
-        }
-      });
     }
 
     /**
@@ -186,6 +145,7 @@
             throw new Error('Transfer is already complete.');
           }
 
+          // Atomic join update
           await transferDoc.update({
             receiverId: peerId,
             status: 'active',
@@ -204,9 +164,8 @@
             }
           };
         } catch (err) {
-          // If offline error or unavailable, attempt AJAX fallback
           if (err.message.includes('offline') || err.message.includes('unavailable') || err.message.includes('permission')) {
-            console.warn('[Signaling] Firestore join failed (offline/error), trying AJAX fallback:', err.message);
+            console.warn('[Signaling] Firestore join failed, falling back to fast AJAX:', err.message);
             this.useAjaxFallback = true;
           } else {
             throw err;
@@ -236,24 +195,99 @@
     }
 
     /**
-     * Send WebRTC Offer
+     * Unified Real-Time Session Listener for Sender & Receiver
+     * Subscribes to single-document real-time stream for instant millisecond handshakes.
+     */
+    listenSession(code, isSender, peerId, handlers) {
+      if (!this.useAjaxFallback && this.firebaseInitialized) {
+        try {
+          let hasHandledReceiver = false;
+          let hasHandledOffer = false;
+          let hasHandledAnswer = false;
+
+          const unsub = this.db.collection('transfers').doc(code).onSnapshot(
+            (snapshot) => {
+              if (!snapshot.exists) return;
+              const data = snapshot.data();
+              if (!data) return;
+
+              if (isSender) {
+                // Sender waits for receiver to join
+                if (data.receiverId && !hasHandledReceiver && handlers.onReceiverJoined) {
+                  hasHandledReceiver = true;
+                  handlers.onReceiverJoined(data.receiverId);
+                }
+
+                // Sender listens for Answer
+                if (data.answer && !hasHandledAnswer && handlers.onAnswer) {
+                  hasHandledAnswer = true;
+                  handlers.onAnswer(data.answer);
+                }
+
+                // Sender listens for incoming receiver candidates
+                if (data.receiverCandidates && Array.isArray(data.receiverCandidates) && handlers.onCandidate) {
+                  data.receiverCandidates.forEach(cand => {
+                    const key = JSON.stringify(cand);
+                    if (!this.processedCandidateKeys.has(key)) {
+                      this.processedCandidateKeys.add(key);
+                      handlers.onCandidate(cand);
+                    }
+                  });
+                }
+              } else {
+                // Receiver listens for Offer
+                if (data.offer && !hasHandledOffer && handlers.onOffer) {
+                  hasHandledOffer = true;
+                  handlers.onOffer(data.offer);
+                }
+
+                // Receiver listens for incoming sender candidates
+                if (data.senderCandidates && Array.isArray(data.senderCandidates) && handlers.onCandidate) {
+                  data.senderCandidates.forEach(cand => {
+                    const key = JSON.stringify(cand);
+                    if (!this.processedCandidateKeys.has(key)) {
+                      this.processedCandidateKeys.add(key);
+                      handlers.onCandidate(cand);
+                    }
+                  });
+                }
+              }
+            },
+            (err) => {
+              console.warn('[Signaling] Snapshot stream error, falling back to fast polling:', err.message);
+              this.startFastPolling(code, peerId, isSender, handlers);
+            }
+          );
+
+          this.unsubscribers.push(unsub);
+          return;
+        } catch (e) {
+          console.warn('[Signaling] Document listener setup error:', e.message);
+        }
+      }
+
+      // Fast AJAX Polling mode (150ms interval)
+      this.startFastPolling(code, peerId, isSender, handlers);
+    }
+
+    /**
+     * Sender transmits WebRTC Offer
      */
     async sendOffer(code, peerId, to, offer) {
       if (!this.useAjaxFallback && this.firebaseInitialized) {
         try {
-          await this.db.collection('transfers')
-            .doc(code)
-            .collection('offers')
-            .add({
+          await this.db.collection('transfers').doc(code).update({
+            offer: {
               from: peerId,
               to: to || '',
               sdp: offer.sdp,
               type: offer.type,
-              createdAt: Date.now()
-            });
+              timestamp: Date.now()
+            }
+          });
           return;
         } catch (e) {
-          console.warn('[Signaling] Failed to send offer to Firestore, trying AJAX:', e.message);
+          console.warn('[Signaling] Firestore sendOffer failed, using AJAX:', e.message);
         }
       }
 
@@ -267,60 +301,23 @@
     }
 
     /**
-     * Listen for WebRTC Offers
-     */
-    listenForOffers(code, peerId, callback) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
-        try {
-          const unsub = this.db.collection('transfers')
-            .doc(code)
-            .collection('offers')
-            .where('to', '==', peerId)
-            .limit(1)
-            .onSnapshot((snapshot) => {
-              snapshot.docChanges().forEach(async (change) => {
-                if (change.type === 'added') {
-                  const offer = change.doc.data();
-                  callback(offer);
-                  try {
-                    await change.doc.ref.delete();
-                  } catch (e) {}
-                }
-              });
-            });
-          this.unsubscribers.push(unsub);
-          return;
-        } catch (e) {
-          console.warn('[Signaling] Listen for offers fallback to polling:', e.message);
-        }
-      }
-
-      this.startPolling(code, peerId, (pollData) => {
-        if (pollData.offers && pollData.offers.length > 0) {
-          pollData.offers.forEach(callback);
-        }
-      });
-    }
-
-    /**
-     * Send WebRTC Answer
+     * Receiver transmits WebRTC Answer
      */
     async sendAnswer(code, peerId, to, answer) {
       if (!this.useAjaxFallback && this.firebaseInitialized) {
         try {
-          await this.db.collection('transfers')
-            .doc(code)
-            .collection('answers')
-            .add({
+          await this.db.collection('transfers').doc(code).update({
+            answer: {
               from: peerId,
               to: to || '',
               sdp: answer.sdp,
               type: answer.type,
-              createdAt: Date.now()
-            });
+              timestamp: Date.now()
+            }
+          });
           return;
         } catch (e) {
-          console.warn('[Signaling] Failed to send answer to Firestore, trying AJAX:', e.message);
+          console.warn('[Signaling] Firestore sendAnswer failed, using AJAX:', e.message);
         }
       }
 
@@ -334,109 +331,113 @@
     }
 
     /**
-     * Listen for WebRTC Answers
+     * Batched ICE candidate transmission for minimal network overhead
      */
-    listenForAnswers(code, peerId, callback) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+    sendCandidate(code, peerId, to, isSender, candidate) {
+      const candJson = candidate.toJSON ? candidate.toJSON() : candidate;
+      this.candidateBatchQueue.push(candJson);
+
+      if (this.candidateBatchTimer) return;
+
+      // Batch candidates in 30ms window
+      this.candidateBatchTimer = setTimeout(async () => {
+        this.candidateBatchTimer = null;
+        const batch = [...this.candidateBatchQueue];
+        this.candidateBatchQueue = [];
+        if (batch.length === 0) return;
+
+        if (!this.useAjaxFallback && this.firebaseInitialized && typeof firebase !== 'undefined') {
+          try {
+            const fieldName = isSender ? 'senderCandidates' : 'receiverCandidates';
+            const transferDoc = this.db.collection('transfers').doc(code);
+            await transferDoc.update({
+              [fieldName]: firebase.firestore.FieldValue.arrayUnion(...batch)
+            });
+            return;
+          } catch (e) {
+            console.warn('[Signaling] Firestore batch candidate update failed, falling back to AJAX:', e.message);
+          }
+        }
+
+        // AJAX candidate transmission
+        for (const c of batch) {
+          ajax.post(CONFIG.SIGNALING_API_URL, {
+            action: 'candidate',
+            code,
+            peerId,
+            to,
+            candidate: c
+          }).catch(() => {});
+        }
+      }, 30);
+    }
+
+    /**
+     * Starts ultra-fast 150ms polling for sub-second AJAX connections
+     */
+    startFastPolling(code, peerId, isSender, handlers, intervalMs = 150) {
+      if (this.activePollingInterval) return;
+
+      let hasHandledReceiver = false;
+      let hasHandledOffer = false;
+      let hasHandledAnswer = false;
+
+      this.activePollingInterval = setInterval(async () => {
         try {
-          const unsub = this.db.collection('transfers')
-            .doc(code)
-            .collection('answers')
-            .where('to', '==', peerId)
-            .limit(1)
-            .onSnapshot((snapshot) => {
-              snapshot.docChanges().forEach(async (change) => {
-                if (change.type === 'added') {
-                  const answer = change.doc.data();
-                  callback(answer);
-                  try {
-                    await change.doc.ref.delete();
-                  } catch (e) {}
+          const response = await ajax.post(CONFIG.SIGNALING_API_URL, {
+            action: 'poll',
+            code,
+            peerId
+          }, { timeout: 2500, retries: 0 });
+
+          if (!response) return;
+
+          if (isSender) {
+            if (response.receiverId && !hasHandledReceiver && handlers.onReceiverJoined) {
+              hasHandledReceiver = true;
+              handlers.onReceiverJoined(response.receiverId);
+            }
+
+            if (response.answers && response.answers.length > 0 && !hasHandledAnswer && handlers.onAnswer) {
+              hasHandledAnswer = true;
+              handlers.onAnswer(response.answers[0]);
+            }
+
+            if (response.candidates && response.candidates.length > 0 && handlers.onCandidate) {
+              response.candidates.forEach(c => {
+                const candData = c.candidate || c;
+                const key = JSON.stringify(candData);
+                if (!this.processedCandidateKeys.has(key)) {
+                  this.processedCandidateKeys.add(key);
+                  handlers.onCandidate(candData);
                 }
               });
-            });
-          this.unsubscribers.push(unsub);
-          return;
-        } catch (e) {
-          console.warn('[Signaling] Listen for answers fallback to polling:', e.message);
-        }
-      }
+            }
+          } else {
+            if (response.offers && response.offers.length > 0 && !hasHandledOffer && handlers.onOffer) {
+              hasHandledOffer = true;
+              handlers.onOffer(response.offers[0]);
+            }
 
-      this.startPolling(code, peerId, (pollData) => {
-        if (pollData.answers && pollData.answers.length > 0) {
-          pollData.answers.forEach(callback);
-        }
-      });
-    }
-
-    /**
-     * Send ICE Candidate
-     */
-    async sendCandidate(code, peerId, to, candidate) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
-        try {
-          await this.db.collection('transfers')
-            .doc(code)
-            .collection('candidates')
-            .add({
-              from: peerId,
-              to: to || '',
-              candidate: candidate.toJSON ? candidate.toJSON() : candidate,
-              createdAt: Date.now()
-            });
-          return;
-        } catch (e) {
-          console.warn('[Signaling] Failed to send candidate to Firestore, trying AJAX:', e.message);
-        }
-      }
-
-      await ajax.post(CONFIG.SIGNALING_API_URL, {
-        action: 'candidate',
-        code,
-        peerId,
-        to,
-        candidate: candidate.toJSON ? candidate.toJSON() : candidate
-      });
-    }
-
-    /**
-     * Listen for ICE Candidates
-     */
-    listenForCandidates(code, peerId, callback) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
-        try {
-          const unsub = this.db.collection('transfers')
-            .doc(code)
-            .collection('candidates')
-            .where('to', '==', peerId)
-            .limit(20)
-            .onSnapshot((snapshot) => {
-              snapshot.docChanges().forEach(async (change) => {
-                if (change.type === 'added') {
-                  const cand = change.doc.data();
-                  callback(cand.candidate);
-                  try {
-                    await change.doc.ref.delete();
-                  } catch (e) {}
+            if (response.candidates && response.candidates.length > 0 && handlers.onCandidate) {
+              response.candidates.forEach(c => {
+                const candData = c.candidate || c;
+                const key = JSON.stringify(candData);
+                if (!this.processedCandidateKeys.has(key)) {
+                  this.processedCandidateKeys.add(key);
+                  handlers.onCandidate(candData);
                 }
               });
-            });
-          this.unsubscribers.push(unsub);
-          return;
+            }
+          }
         } catch (e) {
-          console.warn('[Signaling] Listen for candidates fallback to polling:', e.message);
+          // Keep polling silently
         }
-      }
-
-      this.startPolling(code, peerId, (pollData) => {
-        if (pollData.candidates && pollData.candidates.length > 0) {
-          pollData.candidates.forEach(c => callback(c.candidate || c));
-        }
-      });
+      }, intervalMs);
     }
 
     /**
-     * Mark transfer as complete
+     * Mark transfer complete
      */
     async markComplete(code) {
       if (!this.useAjaxFallback && this.firebaseInitialized) {
@@ -454,43 +455,24 @@
     }
 
     /**
-     * Starts AJAX polling when Firestore listeners are unavailable
-     */
-    startPolling(code, peerId, onUpdate, intervalMs = 1200) {
-      if (this.activePollingInterval) return;
-
-      this.activePollingInterval = setInterval(async () => {
-        try {
-          const response = await ajax.post(CONFIG.SIGNALING_API_URL, {
-            action: 'poll',
-            code,
-            peerId
-          }, { timeout: 3000, retries: 0 });
-
-          if (response) {
-            onUpdate(response);
-          }
-        } catch (e) {
-          // Ignore poll errors quietly
-        }
-      }, intervalMs);
-    }
-
-    /**
-     * Cleans up all listeners, polling intervals, and session handles
+     * Full cleanup
      */
     cleanup(code) {
       if (this.activePollingInterval) {
         clearInterval(this.activePollingInterval);
         this.activePollingInterval = null;
       }
+      if (this.candidateBatchTimer) {
+        clearTimeout(this.candidateBatchTimer);
+        this.candidateBatchTimer = null;
+      }
 
       this.unsubscribers.forEach(unsub => {
-        try {
-          if (typeof unsub === 'function') unsub();
-        } catch (e) {}
+        try { if (typeof unsub === 'function') unsub(); } catch (e) {}
       });
       this.unsubscribers = [];
+      this.processedCandidateKeys.clear();
+      this.candidateBatchQueue = [];
 
       if (code) {
         if (!this.useAjaxFallback && this.firebaseInitialized) {

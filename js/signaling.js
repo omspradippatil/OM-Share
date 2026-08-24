@@ -13,6 +13,26 @@
 })(typeof self !== 'undefined' ? self : this, function(CONFIG, ajax) {
   'use strict';
 
+  function cleanCandidate(cand) {
+    if (!cand) return null;
+    const raw = cand.toJSON ? cand.toJSON() : cand;
+    if (!raw || !raw.candidate) return null;
+
+    const out = {
+      candidate: String(raw.candidate)
+    };
+    if (raw.sdpMid !== undefined && raw.sdpMid !== null) {
+      out.sdpMid = String(raw.sdpMid);
+    }
+    if (raw.sdpMLineIndex !== undefined && raw.sdpMLineIndex !== null) {
+      out.sdpMLineIndex = Number(raw.sdpMLineIndex);
+    }
+    if (raw.usernameFragment !== undefined && raw.usernameFragment !== null) {
+      out.usernameFragment = String(raw.usernameFragment);
+    }
+    return out;
+  }
+
   class HybridSignalingManager {
     constructor() {
       this.db = null;
@@ -80,7 +100,7 @@
      * Creates a new transfer session document
      */
     async createTransfer(code, peerId, fileInfo, clientIP) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           const transferDoc = this.db.collection('transfers').doc(code);
           await transferDoc.set({
@@ -126,7 +146,7 @@
      * Receiver joins a transfer session
      */
     async joinTransfer(code, peerId, clientIP) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           const transferDoc = this.db.collection('transfers').doc(code);
           const doc = await transferDoc.get();
@@ -196,10 +216,9 @@
 
     /**
      * Unified Real-Time Session Listener for Sender & Receiver
-     * Subscribes to single-document real-time stream for instant millisecond handshakes.
      */
     listenSession(code, isSender, peerId, handlers) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           let hasHandledReceiver = false;
           let hasHandledOffer = false;
@@ -227,10 +246,12 @@
                 // Sender listens for incoming receiver candidates
                 if (data.receiverCandidates && Array.isArray(data.receiverCandidates) && handlers.onCandidate) {
                   data.receiverCandidates.forEach(cand => {
-                    const key = JSON.stringify(cand);
+                    const cleaned = cleanCandidate(cand);
+                    if (!cleaned) return;
+                    const key = JSON.stringify(cleaned);
                     if (!this.processedCandidateKeys.has(key)) {
                       this.processedCandidateKeys.add(key);
-                      handlers.onCandidate(cand);
+                      handlers.onCandidate(cleaned);
                     }
                   });
                 }
@@ -244,10 +265,12 @@
                 // Receiver listens for incoming sender candidates
                 if (data.senderCandidates && Array.isArray(data.senderCandidates) && handlers.onCandidate) {
                   data.senderCandidates.forEach(cand => {
-                    const key = JSON.stringify(cand);
+                    const cleaned = cleanCandidate(cand);
+                    if (!cleaned) return;
+                    const key = JSON.stringify(cleaned);
                     if (!this.processedCandidateKeys.has(key)) {
                       this.processedCandidateKeys.add(key);
-                      handlers.onCandidate(cand);
+                      handlers.onCandidate(cleaned);
                     }
                   });
                 }
@@ -274,16 +297,18 @@
      * Sender transmits WebRTC Offer
      */
     async sendOffer(code, peerId, to, offer) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+      const offerData = {
+        from: peerId,
+        to: to || '',
+        sdp: String(offer.sdp || ''),
+        type: String(offer.type || 'offer'),
+        timestamp: Date.now()
+      };
+
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           await this.db.collection('transfers').doc(code).update({
-            offer: {
-              from: peerId,
-              to: to || '',
-              sdp: offer.sdp,
-              type: offer.type,
-              timestamp: Date.now()
-            }
+            offer: offerData
           });
           return;
         } catch (e) {
@@ -296,7 +321,7 @@
         code,
         peerId,
         to,
-        offer
+        offer: offerData
       });
     }
 
@@ -304,16 +329,18 @@
      * Receiver transmits WebRTC Answer
      */
     async sendAnswer(code, peerId, to, answer) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+      const answerData = {
+        from: peerId,
+        to: to || '',
+        sdp: String(answer.sdp || ''),
+        type: String(answer.type || 'answer'),
+        timestamp: Date.now()
+      };
+
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           await this.db.collection('transfers').doc(code).update({
-            answer: {
-              from: peerId,
-              to: to || '',
-              sdp: answer.sdp,
-              type: answer.type,
-              timestamp: Date.now()
-            }
+            answer: answerData
           });
           return;
         } catch (e) {
@@ -326,23 +353,22 @@
         code,
         peerId,
         to,
-        answer
+        answer: answerData
       });
     }
 
     /**
-     * Batched ICE candidate transmission for minimal network overhead
+     * Batched ICE candidate transmission
      */
     sendCandidate(code, peerId, to, isSender, candidate) {
-      if (!candidate) return;
-      const candJson = candidate.toJSON ? candidate.toJSON() : candidate;
-      if (!candJson || (!candJson.candidate && candJson.candidate !== '')) return;
+      const cleaned = cleanCandidate(candidate);
+      if (!cleaned) return;
 
-      this.candidateBatchQueue.push(candJson);
+      this.candidateBatchQueue.push(cleaned);
 
       if (this.candidateBatchTimer) return;
 
-      // Batch candidates in 25ms window
+      // Batch candidates in 20ms window
       this.candidateBatchTimer = setTimeout(async () => {
         this.candidateBatchTimer = null;
         const batch = [...this.candidateBatchQueue];
@@ -372,7 +398,7 @@
             candidate: c
           }).catch(() => {});
         }
-      }, 25);
+      }, 20);
     }
 
     /**
@@ -408,11 +434,12 @@
 
             if (response.candidates && response.candidates.length > 0 && handlers.onCandidate) {
               response.candidates.forEach(c => {
-                const candData = c.candidate || c;
-                const key = JSON.stringify(candData);
+                const cleaned = cleanCandidate(c.candidate || c);
+                if (!cleaned) return;
+                const key = JSON.stringify(cleaned);
                 if (!this.processedCandidateKeys.has(key)) {
                   this.processedCandidateKeys.add(key);
-                  handlers.onCandidate(candData);
+                  handlers.onCandidate(cleaned);
                 }
               });
             }
@@ -424,11 +451,12 @@
 
             if (response.candidates && response.candidates.length > 0 && handlers.onCandidate) {
               response.candidates.forEach(c => {
-                const candData = c.candidate || c;
-                const key = JSON.stringify(candData);
+                const cleaned = cleanCandidate(c.candidate || c);
+                if (!cleaned) return;
+                const key = JSON.stringify(cleaned);
                 if (!this.processedCandidateKeys.has(key)) {
                   this.processedCandidateKeys.add(key);
-                  handlers.onCandidate(candData);
+                  handlers.onCandidate(cleaned);
                 }
               });
             }
@@ -443,7 +471,7 @@
      * Mark transfer complete
      */
     async markComplete(code) {
-      if (!this.useAjaxFallback && this.firebaseInitialized) {
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           await this.db.collection('transfers').doc(code).update({
             status: 'complete',
@@ -478,7 +506,7 @@
       this.candidateBatchQueue = [];
 
       if (code) {
-        if (!this.useAjaxFallback && this.firebaseInitialized) {
+        if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
           this.db.collection('transfers').doc(code).delete().catch(() => {});
         }
         ajax.post(CONFIG.SIGNALING_API_URL, { action: 'cancel', code }).catch(() => {});

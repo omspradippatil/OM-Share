@@ -128,7 +128,7 @@
 # ==========================================
 
 [context.production]
-  command = "echo 'Production build'"
+  command = "node inject-env.js"
   environment = { NODE_ENV = "production" }
 
 [context.production.environment]

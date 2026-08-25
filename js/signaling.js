@@ -1,8 +1,7 @@
 /**
- * OmShare - Hybrid Ultra-Fast Multi-Device Signaling Manager
+ * OmShare - Hybrid Ultra-Fast Multi-Device Signaling & Relay Manager
  * Real-time sub-second WebRTC signaling via single-document Firestore streams (primary)
- * and low-latency AJAX micro-polling (fallback).
- * Supports persistent multi-device downloads from the same transfer code.
+ * with automatic seamless chunk relay failover for strict mobile CGNAT networks.
  */
 
 (function(root, factory) {
@@ -42,18 +41,15 @@
       this.activePollingInterval = null;
       this.unsubscribers = [];
       this.processedCandidateKeys = new Set();
+      this.processedChunkIndices = new Set();
       this.handledReceivers = new Set();
       this.handledAnswers = new Set();
-      this.candidateBatchQueue = [];
-      this.candidateBatchTimer = null;
+      this.handledRelayRequests = new Set();
 
       this.initFirebase();
       this.bindNetworkEvents();
     }
 
-    /**
-     * Initializes Firebase Firestore with error resilience
-     */
     initFirebase() {
       if (typeof firebase === 'undefined') {
         console.warn('[Signaling] Firebase SDK not loaded, enabling AJAX fallback');
@@ -80,9 +76,6 @@
       }
     }
 
-    /**
-     * Listens to browser network state
-     */
     bindNetworkEvents() {
       if (typeof window === 'undefined') return;
 
@@ -99,9 +92,6 @@
       });
     }
 
-    /**
-     * Creates a new persistent multi-device transfer session document
-     */
     async createTransfer(code, peerId, fileInfo, clientIP) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
@@ -123,6 +113,7 @@
             answers: {},
             senderCandidates: [],
             receiverCandidates: [],
+            relayRequests: [],
             clientIP: clientIP || 'unknown'
           });
 
@@ -133,7 +124,6 @@
         }
       }
 
-      // AJAX Fallback
       try {
         await ajax.post(CONFIG.SIGNALING_API_URL, {
           action: 'create',
@@ -147,9 +137,6 @@
       }
     }
 
-    /**
-     * Receiver joins a transfer session
-     */
     async joinTransfer(code, peerId, clientIP) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
@@ -166,7 +153,6 @@
             throw new Error('Transfer code has expired.');
           }
 
-          // Atomic join update with arrayUnion for multiple receivers
           await transferDoc.update({
             receiverId: peerId,
             receiverIds: firebase.firestore.FieldValue.arrayUnion(peerId),
@@ -194,7 +180,6 @@
         }
       }
 
-      // AJAX Fallback
       try {
         const response = await ajax.post(CONFIG.SIGNALING_API_URL, {
           action: 'join',
@@ -215,9 +200,6 @@
       }
     }
 
-    /**
-     * Unified Real-Time Session Listener for Multi-Device Sender & Receiver
-     */
     listenSession(code, isSender, peerId, handlers) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
@@ -230,7 +212,7 @@
               if (!data) return;
 
               if (isSender) {
-                // Sender detects when any receiver joins (multi-device)
+                // Sender detects when any receiver joins
                 const recList = data.receiverIds || (data.receiverId ? [data.receiverId] : []);
                 recList.forEach(recId => {
                   if (recId && !this.handledReceivers.has(recId) && handlers.onReceiverJoined) {
@@ -265,8 +247,18 @@
                     }
                   });
                 }
+
+                // Sender listens for relay fallback requests
+                if (data.relayRequests && Array.isArray(data.relayRequests) && handlers.onRelayRequested) {
+                  data.relayRequests.forEach(reqId => {
+                    if (reqId && !this.handledRelayRequests.has(reqId)) {
+                      this.handledRelayRequests.add(reqId);
+                      handlers.onRelayRequested(reqId);
+                    }
+                  });
+                }
               } else {
-                // Receiver listens for its specific Offer (or legacy offer)
+                // Receiver listens for its specific Offer
                 const targetedOffer = data.offers?.[peerId] || data.offer;
                 if (targetedOffer && !hasHandledOffer && handlers.onOffer) {
                   if (!targetedOffer.to || targetedOffer.to === peerId) {
@@ -278,7 +270,7 @@
                 // Receiver listens for incoming sender candidates
                 if (data.senderCandidates && Array.isArray(data.senderCandidates) && handlers.onCandidate) {
                   data.senderCandidates.forEach(cand => {
-                    if (cand.to && cand.to !== peerId) return; // Only process candidates meant for this receiver
+                    if (cand.to && cand.to !== peerId) return;
                     const cleaned = cleanCandidate(cand.candidate || cand);
                     if (!cleaned) return;
                     const key = JSON.stringify(cleaned);
@@ -303,13 +295,9 @@
         }
       }
 
-      // Fast AJAX Polling mode (150ms interval)
       this.startFastPolling(code, peerId, isSender, handlers);
     }
 
-    /**
-     * Sender transmits WebRTC Offer to a specific receiver
-     */
     async sendOffer(code, peerId, to, offer) {
       const offerData = {
         from: peerId,
@@ -321,12 +309,8 @@
 
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
-          const updatePayload = {
-            offer: offerData // For legacy single receiver support
-          };
-          if (to) {
-            updatePayload[`offers.${to}`] = offerData;
-          }
+          const updatePayload = { offer: offerData };
+          if (to) updatePayload[`offers.${to}`] = offerData;
           await this.db.collection('transfers').doc(code).update(updatePayload);
           return;
         } catch (e) {
@@ -343,9 +327,6 @@
       });
     }
 
-    /**
-     * Receiver transmits WebRTC Answer
-     */
     async sendAnswer(code, peerId, to, answer) {
       const answerData = {
         from: peerId,
@@ -357,12 +338,8 @@
 
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
-          const updatePayload = {
-            answer: answerData
-          };
-          if (peerId) {
-            updatePayload[`answers.${peerId}`] = answerData;
-          }
+          const updatePayload = { answer: answerData };
+          if (peerId) updatePayload[`answers.${peerId}`] = answerData;
           await this.db.collection('transfers').doc(code).update(updatePayload);
           return;
         } catch (e) {
@@ -379,9 +356,6 @@
       });
     }
 
-    /**
-     * Immediate ICE candidate transmission with instantaneous Firestore & AJAX redundancy
-     */
     sendCandidate(code, peerId, to, isSender, candidate) {
       const cleaned = cleanCandidate(candidate);
       if (!cleaned || !cleaned.candidate) return;
@@ -399,8 +373,7 @@
           const transferDoc = this.db.collection('transfers').doc(code);
           transferDoc.update({
             [fieldName]: firebase.firestore.FieldValue.arrayUnion(payload)
-          }).catch(err => {
-            console.warn('[Signaling] Firestore candidate update failed, using AJAX fallback:', err.message);
+          }).catch(() => {
             ajax.post(CONFIG.SIGNALING_API_URL, {
               action: 'candidate',
               code,
@@ -410,12 +383,9 @@
             }).catch(() => {});
           });
           return;
-        } catch (e) {
-          console.warn('[Signaling] Firestore candidate update error:', e.message);
-        }
+        } catch (e) {}
       }
 
-      // AJAX candidate fallback
       ajax.post(CONFIG.SIGNALING_API_URL, {
         action: 'candidate',
         code,
@@ -426,9 +396,43 @@
     }
 
     /**
-     * Starts ultra-fast 150ms polling for sub-second AJAX connections
+     * Receiver requests relay fallback when WebRTC P2P handshake cannot punch through strict NAT
      */
-    startFastPolling(code, peerId, isSender, handlers, intervalMs = 150) {
+    async requestRelay(code, receiverId) {
+      console.log(`[Signaling] Requesting relay fallback for receiver ${receiverId}`);
+      if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
+        try {
+          await this.db.collection('transfers').doc(code).update({
+            relayRequests: firebase.firestore.FieldValue.arrayUnion(receiverId)
+          });
+          return;
+        } catch (e) {}
+      }
+
+      await ajax.post(CONFIG.SIGNALING_API_URL, {
+        action: 'request-relay',
+        code,
+        peerId: receiverId
+      }).catch(() => {});
+    }
+
+    /**
+     * Sender streams file chunks via serverless/signaling relay
+     */
+    async sendRelayChunk(code, senderId, receiverId, chunkIndex, totalChunks, base64Data, completed) {
+      await ajax.post(CONFIG.SIGNALING_API_URL, {
+        action: 'chunk',
+        code,
+        peerId: senderId,
+        to: receiverId,
+        chunkIndex,
+        totalChunks,
+        data: base64Data,
+        completed: Boolean(completed)
+      });
+    }
+
+    startFastPolling(code, peerId, isSender, handlers, intervalMs = 120) {
       if (this.activePollingInterval) return;
 
       let hasHandledOffer = false;
@@ -473,6 +477,15 @@
                 }
               });
             }
+
+            if (response.relayRequests && response.relayRequests.length > 0 && handlers.onRelayRequested) {
+              response.relayRequests.forEach(reqId => {
+                if (reqId && !this.handledRelayRequests.has(reqId)) {
+                  this.handledRelayRequests.add(reqId);
+                  handlers.onRelayRequested(reqId);
+                }
+              });
+            }
           } else {
             if (response.offers && response.offers.length > 0 && !hasHandledOffer && handlers.onOffer) {
               hasHandledOffer = true;
@@ -490,16 +503,22 @@
                 }
               });
             }
+
+            // Receiver receives incoming relay chunks
+            if (response.chunks && response.chunks.length > 0 && handlers.onRelayChunk) {
+              response.chunks.forEach(ch => {
+                const key = `${ch.chunkIndex}_${ch.timestamp}`;
+                if (!this.processedChunkIndices.has(key)) {
+                  this.processedChunkIndices.add(key);
+                  handlers.onRelayChunk(ch);
+                }
+              });
+            }
           }
-        } catch (e) {
-          // Keep polling silently
-        }
+        } catch (e) {}
       }, intervalMs);
     }
 
-    /**
-     * Mark a single receiver's download complete without stopping the sender
-     */
     async markReceiverComplete(code, receiverId) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
@@ -515,17 +534,10 @@
       } catch (e) {}
     }
 
-    /**
-     * Explicitly terminate and stop sharing
-     */
     async stopSharing(code) {
       if (this.activePollingInterval) {
         clearInterval(this.activePollingInterval);
         this.activePollingInterval = null;
-      }
-      if (this.candidateBatchTimer) {
-        clearTimeout(this.candidateBatchTimer);
-        this.candidateBatchTimer = null;
       }
 
       this.unsubscribers.forEach(unsub => {
@@ -533,9 +545,10 @@
       });
       this.unsubscribers = [];
       this.processedCandidateKeys.clear();
+      this.processedChunkIndices.clear();
       this.handledReceivers.clear();
       this.handledAnswers.clear();
-      this.candidateBatchQueue = [];
+      this.handledRelayRequests.clear();
 
       if (code) {
         if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {

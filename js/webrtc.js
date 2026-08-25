@@ -462,9 +462,7 @@
       this.fallbackTimeoutTimer = setTimeout(async () => {
         if (!this.receiverDataChannel || this.receiverDataChannel.readyState !== 'open') {
           console.warn('[WebRTC] Direct P2P negotiation timed out. Requesting relay fallback.');
-          this.isRelayFallbackActive = true;
-          this.emit('status', 'Connecting via secure relay stream...');
-          await this.signaling.requestRelay(this.code, this.peerId);
+          await this.triggerReceiverRelayFallback();
         }
       }, 3500);
 
@@ -481,10 +479,7 @@
           this.emit('connected');
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
           console.warn('[WebRTC] Receiver connection state failed. Activating relay.');
-          if (!this.isRelayFallbackActive) {
-            this.isRelayFallbackActive = true;
-            this.signaling.requestRelay(this.code, this.peerId);
-          }
+          this.triggerReceiverRelayFallback();
         }
       };
 
@@ -494,10 +489,7 @@
           if (this.fallbackTimeoutTimer) clearTimeout(this.fallbackTimeoutTimer);
           this.emit('connected');
         } else if (pc.iceConnectionState === 'failed') {
-          if (!this.isRelayFallbackActive) {
-            this.isRelayFallbackActive = true;
-            this.signaling.requestRelay(this.code, this.peerId);
-          }
+          this.triggerReceiverRelayFallback();
         }
       };
 

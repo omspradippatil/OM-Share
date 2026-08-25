@@ -283,6 +283,7 @@
 
                 // Receiver listens for incoming relay chunks in real-time
                 if (data.chunks && Array.isArray(data.chunks) && handlers.onRelayChunk) {
+                  data.chunks.forEach(ch => {
                     if (ch.to && ch.to !== peerId) return;
                     const key = `${ch.chunkIndex}_${ch.timestamp || ''}`;
                     if (!this.processedChunkIndices.has(key)) {

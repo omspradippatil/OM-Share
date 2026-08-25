@@ -547,6 +547,16 @@
       return this.fileInfo;
     }
 
+    async triggerReceiverRelayFallback() {
+      if (this.isRelayFallbackActive) return;
+      this.isRelayFallbackActive = true;
+      console.warn('[WebRTC] Activating serverless relay fallback stream on receiver...');
+      this.emit('status', 'Connecting via secure relay stream...');
+      await this.signaling.requestRelay(this.code, this.peerId, {
+        onRelayChunk: (chunk) => this.handleRelayChunk(chunk)
+      });
+    }
+
     setupReceiverDataChannel() {
       if (!this.receiverDataChannel) return;
       this.receiverDataChannel.binaryType = 'arraybuffer';

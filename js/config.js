@@ -43,7 +43,7 @@
     { urls: 'stun:stun.syncthing.net:3478' },
     { urls: 'stun:stun.services.mozilla.com:3478' },
 
-    // OpenRelay Public TURN Relay (UDP, TCP, and TLS on Ports 80 & 443 for Mobile Carrier CGNAT & Symmetric NAT Traversal)
+    // OpenRelay Public TURN Relay (OpenRelayProject credentials)
     {
       urls: [
         'turn:openrelay.metered.ca:80',
@@ -54,8 +54,19 @@
         'turns:openrelay.metered.ca:443',
         'turns:openrelay.metered.ca:80'
       ],
-      username: 'openrelay',
-      credential: 'openrelay'
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: [
+        'turn:global.relay.metered.ca:80',
+        'turn:global.relay.metered.ca:80?transport=tcp',
+        'turn:global.relay.metered.ca:443',
+        'turn:global.relay.metered.ca:443?transport=tcp',
+        'turns:global.relay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
     },
     {
       urls: [
@@ -65,8 +76,8 @@
         'turn:relay.metered.ca:443?transport=tcp',
         'turns:relay.metered.ca:443?transport=tcp'
       ],
-      username: 'openrelay',
-      credential: 'openrelay'
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
     }
   ];
 
@@ -102,8 +113,19 @@
           'turns:openrelay.metered.ca:443',
           'turns:openrelay.metered.ca:80'
         ],
-        username: 'openrelay',
-        credential: 'openrelay'
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: [
+          'turn:global.relay.metered.ca:80',
+          'turn:global.relay.metered.ca:80?transport=tcp',
+          'turn:global.relay.metered.ca:443',
+          'turn:global.relay.metered.ca:443?transport=tcp',
+          'turns:global.relay.metered.ca:443?transport=tcp'
+        ],
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
       },
       {
         urls: [
@@ -113,8 +135,8 @@
           'turn:relay.metered.ca:443?transport=tcp',
           'turns:relay.metered.ca:443?transport=tcp'
         ],
-        username: 'openrelay',
-        credential: 'openrelay'
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
       }
     ])
   ];

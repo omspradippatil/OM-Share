@@ -252,13 +252,19 @@
       }
 
       if (!session || !session.pc || !session.pc.remoteDescription || !session.pc.remoteDescription.type) {
-        if (session) session.pendingCandidates.push(candObj);
+        if (session) {
+          session.pendingCandidates.push(candObj);
+          console.log(`[WebRTC] Queued candidate for receiver (waiting for remote description):`, candObj.candidate.substring(0, 45));
+        }
         return;
       }
 
       try {
         await session.pc.addIceCandidate(new RTCIceCandidate(candObj));
-      } catch (e) {}
+        console.log(`[WebRTC] Successfully added ICE candidate for ${session.receiverId}:`, candObj.candidate.substring(0, 45));
+      } catch (e) {
+        console.warn(`[WebRTC] ICE candidate add warning for ${session.receiverId}:`, e.message);
+      }
     }
 
     /**
@@ -397,7 +403,10 @@
                 const cand = this.pendingReceiverCandidates.shift();
                 try {
                   await this.receiverPC.addIceCandidate(new RTCIceCandidate(cand));
-                } catch (e) {}
+                  console.log('[WebRTC] Receiver applied queued sender candidate:', cand.candidate.substring(0, 45));
+                } catch (e) {
+                  console.warn('[WebRTC] Queued candidate add error:', e.message);
+                }
               }
 
               const answer = await this.receiverPC.createAnswer();
@@ -416,12 +425,16 @@
 
           if (!this.receiverPC || !this.receiverPC.remoteDescription || !this.receiverPC.remoteDescription.type) {
             this.pendingReceiverCandidates.push(candObj);
+            console.log('[WebRTC] Receiver queued sender candidate (waiting for offer/remote description):', candObj.candidate.substring(0, 45));
             return;
           }
 
           try {
             await this.receiverPC.addIceCandidate(new RTCIceCandidate(candObj));
-          } catch (e) {}
+            console.log('[WebRTC] Receiver successfully applied sender candidate:', candObj.candidate.substring(0, 45));
+          } catch (e) {
+            console.warn('[WebRTC] Receiver candidate add error:', e.message);
+          }
         }
       });
 

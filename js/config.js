@@ -66,9 +66,32 @@
     .filter(Boolean)
     .map(url => ({ urls: url }));
 
-  const iceServers = customStuns.length > 0 || customTurns.length > 0 
-    ? [...customStuns, ...customTurns] 
-    : defaultIceServers;
+  // Merge custom STUN and TURN with high-availability fallbacks
+  const iceServers = [
+    ...(customStuns.length > 0 ? customStuns : [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' }
+    ]),
+    ...(customTurns.length > 0 ? customTurns : [
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelay',
+        credential: 'openrelay'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelay',
+        credential: 'openrelay'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelay',
+        credential: 'openrelay'
+      }
+    ])
+  ];
 
   const firebaseConfig = {
     apiKey: getEnvVar('FIREBASE_API_KEY'),

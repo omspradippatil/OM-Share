@@ -304,7 +304,7 @@
       if (!this.dataChannel) return;
       this.dataChannel.binaryType = 'arraybuffer';
 
-      this.dataChannel.onopen = () => {
+      const handleOpen = () => {
         const duration = this.startTime ? `${Date.now() - this.startTime}ms` : '';
         console.log(`[WebRTC] DataChannel opened in ${duration}!`);
         this.emit('connected');
@@ -312,6 +312,14 @@
           this.startStreamingFile();
         }
       };
+
+      this.dataChannel.onopen = handleOpen;
+
+      // Handle edge case: channel is already in 'open' state
+      if (this.dataChannel.readyState === 'open') {
+        console.log('[WebRTC] DataChannel already open, triggering immediately');
+        handleOpen();
+      }
 
       this.dataChannel.onmessage = (event) => {
         if (typeof event.data === 'string') {

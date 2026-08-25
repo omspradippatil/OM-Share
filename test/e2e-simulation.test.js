@@ -99,12 +99,42 @@ test('E2E Simulation: Full Serverless Handshake with Candidate Sanitization and 
   assert.strictEqual(senderPollData.candidates.length, 1);
   assert.strictEqual(senderPollData.candidates[0].candidate.candidate, receiverCandidate.candidate);
 
-  // 8. Complete session
-  const compRes = await handler({
+  // 8. Complete session for receiver 1 (session stays active for more devices)
+  const compRes1 = await handler({
     httpMethod: 'POST',
     body: JSON.stringify({ action: 'complete', code })
   });
-  assert.strictEqual(compRes.statusCode, 200);
+  assert.strictEqual(compRes1.statusCode, 200);
+
+  // 9. Receiver 2 joins the SAME code
+  const receiver2Id = 'peer_receiver_test_3';
+  const join2Res = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'join', code, peerId: receiver2Id })
+  });
+  assert.strictEqual(join2Res.statusCode, 200);
+
+  // 10. Complete session for receiver 2
+  const compRes2 = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'complete', code })
+  });
+  assert.strictEqual(compRes2.statusCode, 200);
+  assert.strictEqual(JSON.parse(compRes2.body).downloadsCount, 2);
+
+  // 11. Sender explicitly terminates session with cancel
+  const cancelRes = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'cancel', code })
+  });
+  assert.strictEqual(cancelRes.statusCode, 200);
+
+  // 12. Subsequent poll returns 404 (session closed)
+  const postCancelPoll = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'poll', code, peerId: senderId })
+  });
+  assert.strictEqual(postCancelPoll.statusCode, 404);
 });
 
 test('WebRTC & Chunk Streaming Math Verification', () => {

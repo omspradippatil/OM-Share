@@ -1,7 +1,8 @@
 /**
- * OmShare - Hybrid Ultra-Fast Signaling Manager
+ * OmShare - Hybrid Ultra-Fast Multi-Device Signaling Manager
  * Real-time sub-second WebRTC signaling via single-document Firestore streams (primary)
  * and low-latency AJAX micro-polling (fallback).
+ * Supports persistent multi-device downloads from the same transfer code.
  */
 
 (function(root, factory) {
@@ -41,6 +42,8 @@
       this.activePollingInterval = null;
       this.unsubscribers = [];
       this.processedCandidateKeys = new Set();
+      this.handledReceivers = new Set();
+      this.handledAnswers = new Set();
       this.candidateBatchQueue = [];
       this.candidateBatchTimer = null;
 
@@ -97,7 +100,7 @@
     }
 
     /**
-     * Creates a new transfer session document
+     * Creates a new persistent multi-device transfer session document
      */
     async createTransfer(code, peerId, fileInfo, clientIP) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
@@ -106,6 +109,7 @@
           await transferDoc.set({
             code,
             senderId: peerId,
+            receiverIds: [],
             receiverId: null,
             fileName: fileInfo.name,
             fileSize: fileInfo.size,
@@ -113,9 +117,10 @@
             totalChunks: fileInfo.totalChunks,
             createdAt: Date.now(),
             expiresAt: Date.now() + CONFIG.CODE_EXPIRY,
-            status: 'waiting',
-            offer: null,
-            answer: null,
+            status: 'sharing',
+            downloadsCount: 0,
+            offers: {},
+            answers: {},
             senderCandidates: [],
             receiverCandidates: [],
             clientIP: clientIP || 'unknown'
@@ -161,16 +166,12 @@
             throw new Error('Transfer code has expired.');
           }
 
-          if (data.status === 'complete') {
-            throw new Error('Transfer is already complete.');
-          }
-
-          // Atomic join update
+          // Atomic join update with arrayUnion for multiple receivers
           await transferDoc.update({
             receiverId: peerId,
-            status: 'active',
+            receiverIds: firebase.firestore.FieldValue.arrayUnion(peerId),
             receiverIP: clientIP || 'unknown',
-            receiverJoinedAt: Date.now()
+            latestJoinAt: Date.now()
           });
 
           return {
@@ -215,14 +216,12 @@
     }
 
     /**
-     * Unified Real-Time Session Listener for Sender & Receiver
+     * Unified Real-Time Session Listener for Multi-Device Sender & Receiver
      */
     listenSession(code, isSender, peerId, handlers) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
-          let hasHandledReceiver = false;
           let hasHandledOffer = false;
-          let hasHandledAnswer = false;
 
           const unsub = this.db.collection('transfers').doc(code).onSnapshot(
             (snapshot) => {
@@ -231,41 +230,56 @@
               if (!data) return;
 
               if (isSender) {
-                // Sender waits for receiver to join
-                if (data.receiverId && !hasHandledReceiver && handlers.onReceiverJoined) {
-                  hasHandledReceiver = true;
-                  handlers.onReceiverJoined(data.receiverId);
-                }
+                // Sender detects when any receiver joins (multi-device)
+                const recList = data.receiverIds || (data.receiverId ? [data.receiverId] : []);
+                recList.forEach(recId => {
+                  if (recId && !this.handledReceivers.has(recId) && handlers.onReceiverJoined) {
+                    this.handledReceivers.add(recId);
+                    handlers.onReceiverJoined(recId);
+                  }
+                });
 
-                // Sender listens for Answer
-                if (data.answer && !hasHandledAnswer && handlers.onAnswer) {
-                  hasHandledAnswer = true;
-                  handlers.onAnswer(data.answer);
+                // Sender listens for Answers from any receiver
+                if (data.answers && typeof data.answers === 'object') {
+                  Object.entries(data.answers).forEach(([recId, ans]) => {
+                    const key = recId + '_' + (ans.timestamp || '');
+                    if (!this.handledAnswers.has(key) && handlers.onAnswer) {
+                      this.handledAnswers.add(key);
+                      handlers.onAnswer(ans, recId);
+                    }
+                  });
+                } else if (data.answer && !this.handledAnswers.has('legacy') && handlers.onAnswer) {
+                  this.handledAnswers.add('legacy');
+                  handlers.onAnswer(data.answer, data.receiverId);
                 }
 
                 // Sender listens for incoming receiver candidates
                 if (data.receiverCandidates && Array.isArray(data.receiverCandidates) && handlers.onCandidate) {
                   data.receiverCandidates.forEach(cand => {
-                    const cleaned = cleanCandidate(cand);
+                    const cleaned = cleanCandidate(cand.candidate || cand);
                     if (!cleaned) return;
-                    const key = JSON.stringify(cleaned);
+                    const key = JSON.stringify(cleaned) + '_' + (cand.from || '');
                     if (!this.processedCandidateKeys.has(key)) {
                       this.processedCandidateKeys.add(key);
-                      handlers.onCandidate(cleaned);
+                      handlers.onCandidate(cleaned, cand.from);
                     }
                   });
                 }
               } else {
-                // Receiver listens for Offer
-                if (data.offer && !hasHandledOffer && handlers.onOffer) {
-                  hasHandledOffer = true;
-                  handlers.onOffer(data.offer);
+                // Receiver listens for its specific Offer (or legacy offer)
+                const targetedOffer = data.offers?.[peerId] || data.offer;
+                if (targetedOffer && !hasHandledOffer && handlers.onOffer) {
+                  if (!targetedOffer.to || targetedOffer.to === peerId) {
+                    hasHandledOffer = true;
+                    handlers.onOffer(targetedOffer);
+                  }
                 }
 
                 // Receiver listens for incoming sender candidates
                 if (data.senderCandidates && Array.isArray(data.senderCandidates) && handlers.onCandidate) {
                   data.senderCandidates.forEach(cand => {
-                    const cleaned = cleanCandidate(cand);
+                    if (cand.to && cand.to !== peerId) return; // Only process candidates meant for this receiver
+                    const cleaned = cleanCandidate(cand.candidate || cand);
                     if (!cleaned) return;
                     const key = JSON.stringify(cleaned);
                     if (!this.processedCandidateKeys.has(key)) {
@@ -294,7 +308,7 @@
     }
 
     /**
-     * Sender transmits WebRTC Offer
+     * Sender transmits WebRTC Offer to a specific receiver
      */
     async sendOffer(code, peerId, to, offer) {
       const offerData = {
@@ -307,9 +321,13 @@
 
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
-          await this.db.collection('transfers').doc(code).update({
-            offer: offerData
-          });
+          const updatePayload = {
+            offer: offerData // For legacy single receiver support
+          };
+          if (to) {
+            updatePayload[`offers.${to}`] = offerData;
+          }
+          await this.db.collection('transfers').doc(code).update(updatePayload);
           return;
         } catch (e) {
           console.warn('[Signaling] Firestore sendOffer failed, using AJAX:', e.message);
@@ -339,9 +357,13 @@
 
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
-          await this.db.collection('transfers').doc(code).update({
+          const updatePayload = {
             answer: answerData
-          });
+          };
+          if (peerId) {
+            updatePayload[`answers.${peerId}`] = answerData;
+          }
+          await this.db.collection('transfers').doc(code).update(updatePayload);
           return;
         } catch (e) {
           console.warn('[Signaling] Firestore sendAnswer failed, using AJAX:', e.message);
@@ -358,47 +380,49 @@
     }
 
     /**
-     * Batched ICE candidate transmission
+     * Immediate ICE candidate transmission with instantaneous Firestore & AJAX redundancy
      */
     sendCandidate(code, peerId, to, isSender, candidate) {
       const cleaned = cleanCandidate(candidate);
-      if (!cleaned) return;
+      if (!cleaned || !cleaned.candidate) return;
 
-      this.candidateBatchQueue.push(cleaned);
+      const payload = {
+        from: peerId,
+        to: to || '',
+        candidate: cleaned,
+        timestamp: Date.now()
+      };
 
-      if (this.candidateBatchTimer) return;
-
-      // Batch candidates in 20ms window
-      this.candidateBatchTimer = setTimeout(async () => {
-        this.candidateBatchTimer = null;
-        const batch = [...this.candidateBatchQueue];
-        this.candidateBatchQueue = [];
-        if (batch.length === 0) return;
-
-        if (!this.useAjaxFallback && this.firebaseInitialized && typeof firebase !== 'undefined' && this.db) {
-          try {
-            const fieldName = isSender ? 'senderCandidates' : 'receiverCandidates';
-            const transferDoc = this.db.collection('transfers').doc(code);
-            await transferDoc.update({
-              [fieldName]: firebase.firestore.FieldValue.arrayUnion(...batch)
-            });
-            return;
-          } catch (e) {
-            console.warn('[Signaling] Firestore batch candidate update failed, falling back to AJAX:', e.message);
-          }
+      if (!this.useAjaxFallback && this.firebaseInitialized && typeof firebase !== 'undefined' && this.db) {
+        try {
+          const fieldName = isSender ? 'senderCandidates' : 'receiverCandidates';
+          const transferDoc = this.db.collection('transfers').doc(code);
+          transferDoc.update({
+            [fieldName]: firebase.firestore.FieldValue.arrayUnion(payload)
+          }).catch(err => {
+            console.warn('[Signaling] Firestore candidate update failed, using AJAX fallback:', err.message);
+            ajax.post(CONFIG.SIGNALING_API_URL, {
+              action: 'candidate',
+              code,
+              peerId,
+              to: to || '',
+              candidate: cleaned
+            }).catch(() => {});
+          });
+          return;
+        } catch (e) {
+          console.warn('[Signaling] Firestore candidate update error:', e.message);
         }
+      }
 
-        // AJAX candidate transmission
-        for (const c of batch) {
-          ajax.post(CONFIG.SIGNALING_API_URL, {
-            action: 'candidate',
-            code,
-            peerId,
-            to: to || '',
-            candidate: c
-          }).catch(() => {});
-        }
-      }, 20);
+      // AJAX candidate fallback
+      ajax.post(CONFIG.SIGNALING_API_URL, {
+        action: 'candidate',
+        code,
+        peerId,
+        to: to || '',
+        candidate: cleaned
+      }).catch(() => {});
     }
 
     /**
@@ -407,9 +431,7 @@
     startFastPolling(code, peerId, isSender, handlers, intervalMs = 150) {
       if (this.activePollingInterval) return;
 
-      let hasHandledReceiver = false;
       let hasHandledOffer = false;
-      let hasHandledAnswer = false;
 
       this.activePollingInterval = setInterval(async () => {
         try {
@@ -422,24 +444,32 @@
           if (!response) return;
 
           if (isSender) {
-            if (response.receiverId && !hasHandledReceiver && handlers.onReceiverJoined) {
-              hasHandledReceiver = true;
-              handlers.onReceiverJoined(response.receiverId);
-            }
+            const recList = response.receivers || (response.receiverId ? [response.receiverId] : []);
+            recList.forEach(recId => {
+              if (recId && !this.handledReceivers.has(recId) && handlers.onReceiverJoined) {
+                this.handledReceivers.add(recId);
+                handlers.onReceiverJoined(recId);
+              }
+            });
 
-            if (response.answers && response.answers.length > 0 && !hasHandledAnswer && handlers.onAnswer) {
-              hasHandledAnswer = true;
-              handlers.onAnswer(response.answers[0]);
+            if (response.answers && response.answers.length > 0 && handlers.onAnswer) {
+              response.answers.forEach(ans => {
+                const key = ans.from + '_' + (ans.timestamp || '');
+                if (!this.handledAnswers.has(key)) {
+                  this.handledAnswers.add(key);
+                  handlers.onAnswer(ans, ans.from);
+                }
+              });
             }
 
             if (response.candidates && response.candidates.length > 0 && handlers.onCandidate) {
               response.candidates.forEach(c => {
                 const cleaned = cleanCandidate(c.candidate || c);
                 if (!cleaned) return;
-                const key = JSON.stringify(cleaned);
+                const key = JSON.stringify(cleaned) + '_' + (c.from || '');
                 if (!this.processedCandidateKeys.has(key)) {
                   this.processedCandidateKeys.add(key);
-                  handlers.onCandidate(cleaned);
+                  handlers.onCandidate(cleaned, c.from);
                 }
               });
             }
@@ -468,27 +498,27 @@
     }
 
     /**
-     * Mark transfer complete
+     * Mark a single receiver's download complete without stopping the sender
      */
-    async markComplete(code) {
+    async markReceiverComplete(code, receiverId) {
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           await this.db.collection('transfers').doc(code).update({
-            status: 'complete',
-            completedAt: Date.now()
+            downloadsCount: firebase.firestore.FieldValue.increment(1),
+            latestCompletedAt: Date.now()
           });
         } catch (e) {}
       }
 
       try {
-        await ajax.post(CONFIG.SIGNALING_API_URL, { action: 'complete', code });
+        await ajax.post(CONFIG.SIGNALING_API_URL, { action: 'complete', code, receiverId });
       } catch (e) {}
     }
 
     /**
-     * Full cleanup
+     * Explicitly terminate and stop sharing
      */
-    cleanup(code) {
+    async stopSharing(code) {
       if (this.activePollingInterval) {
         clearInterval(this.activePollingInterval);
         this.activePollingInterval = null;
@@ -503,14 +533,24 @@
       });
       this.unsubscribers = [];
       this.processedCandidateKeys.clear();
+      this.handledReceivers.clear();
+      this.handledAnswers.clear();
       this.candidateBatchQueue = [];
 
       if (code) {
         if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
-          this.db.collection('transfers').doc(code).delete().catch(() => {});
+          try {
+            await this.db.collection('transfers').doc(code).delete();
+          } catch (e) {}
         }
-        ajax.post(CONFIG.SIGNALING_API_URL, { action: 'cancel', code }).catch(() => {});
+        try {
+          await ajax.post(CONFIG.SIGNALING_API_URL, { action: 'cancel', code });
+        } catch (e) {}
       }
+    }
+
+    cleanup(code) {
+      return this.stopSharing(code);
     }
   }
 

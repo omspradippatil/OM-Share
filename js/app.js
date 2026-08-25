@@ -1,6 +1,7 @@
 /**
  * OmShare - Main Application UI Controller
- * Integrates WebRTC streaming, hybrid signaling, AJAX diagnostics, and reactive UI updates.
+ * Integrates WebRTC streaming, multi-device persistent sharing, reactive HUD updates,
+ * and high-fidelity micro-interactions.
  */
 
 (function(root, factory) {
@@ -39,6 +40,7 @@
       this.webrtc = null;
       this.currentFile = null;
       this.transferStartTime = null;
+      this.activeTransferCode = null;
 
       // Safe DOM initialization
       if (!this.initElements()) {
@@ -48,6 +50,7 @@
 
       this.bindEvents();
       this.initNetworkStatus();
+      this.checkUrlParameters();
     }
 
     initElements() {
@@ -66,12 +69,25 @@
       this.sharingPanel = document.getElementById('sharing-panel');
       this.shareCodeEl = document.getElementById('share-code');
       this.copyCodeBtn = document.getElementById('copy-code');
+      this.copyLinkBtn = document.getElementById('copy-link');
+      this.stopSharingBtn = document.getElementById('stop-sharing');
+      this.downloadsBadge = document.getElementById('downloads-badge');
       this.sendStatusEl = document.getElementById('send-status');
+      this.sendStatusRipple = document.getElementById('send-status-ripple');
       this.sendProgressEl = document.getElementById('send-progress');
       this.progressFill = document.getElementById('progress-fill');
       this.progressPercentEl = document.getElementById('progress-percent');
       this.progressSpeedEl = document.getElementById('progress-speed');
-      this.cancelSendBtn = document.getElementById('cancel-send');
+
+      // Digit display boxes
+      this.digitBoxes = [
+        document.getElementById('digit-0'),
+        document.getElementById('digit-1'),
+        document.getElementById('digit-2'),
+        document.getElementById('digit-3'),
+        document.getElementById('digit-4'),
+        document.getElementById('digit-5')
+      ];
 
       // Receive panel elements
       this.codeInput = document.getElementById('code-input');
@@ -81,16 +97,16 @@
       this.incomingNameEl = document.getElementById('incoming-name');
       this.incomingSizeEl = document.getElementById('incoming-size');
       this.receiveStatusEl = document.getElementById('receive-status');
+      this.receiveStatusRipple = document.getElementById('receive-status-ripple');
       this.receiveProgressEl = document.getElementById('receive-progress');
       this.receiveProgressFill = document.getElementById('receive-progress-fill');
       this.receivePercentEl = document.getElementById('receive-percent');
       this.receiveSpeedEl = document.getElementById('receive-speed');
       this.cancelReceiveBtn = document.getElementById('cancel-receive');
 
-      // Status indicator
+      // Global status indicator
       this.connectionStatusEl = document.getElementById('connection-status');
 
-      // Return true if critical elements are found
       return Boolean(this.dropzone && this.codeInput);
     }
 
@@ -129,7 +145,8 @@
       if (this.removeFileBtn) this.removeFileBtn.addEventListener('click', () => this.clearFile());
       if (this.createCodeBtn) this.createCodeBtn.addEventListener('click', () => this.startSending());
       if (this.copyCodeBtn) this.copyCodeBtn.addEventListener('click', () => this.copyCode());
-      if (this.cancelSendBtn) this.cancelSendBtn.addEventListener('click', () => this.cancelTransfer());
+      if (this.copyLinkBtn) this.copyLinkBtn.addEventListener('click', () => this.copyShareLink());
+      if (this.stopSharingBtn) this.stopSharingBtn.addEventListener('click', () => this.stopSharing());
 
       // Receive actions
       if (this.codeInput) {
@@ -137,6 +154,11 @@
           e.target.value = e.target.value.replace(/[^0-9]/g, '');
           if (this.connectBtn) {
             this.connectBtn.disabled = e.target.value.length !== 6;
+          }
+          if (e.target.value.length === 6) {
+            this.connectBtn.classList.add('ready-pulse');
+          } else {
+            this.connectBtn.classList.remove('ready-pulse');
           }
         });
 
@@ -148,7 +170,26 @@
       }
 
       if (this.connectBtn) this.connectBtn.addEventListener('click', () => this.startReceiving());
-      if (this.cancelReceiveBtn) this.cancelReceiveBtn.addEventListener('click', () => this.cancelTransfer());
+      if (this.cancelReceiveBtn) this.cancelReceiveBtn.addEventListener('click', () => this.cancelReceive());
+    }
+
+    checkUrlParameters() {
+      if (typeof window === 'undefined' || !window.location) return;
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      const codeParam = params.get('code');
+
+      if (codeParam && codeParam.length === 6) {
+        this.switchTab('receive');
+        if (this.codeInput) {
+          this.codeInput.value = codeParam;
+          if (this.connectBtn) this.connectBtn.disabled = false;
+        }
+      } else if (tabParam === 'send') {
+        this.switchTab('send');
+      } else if (tabParam === 'receive') {
+        this.switchTab('receive');
+      }
     }
 
     async initNetworkStatus() {
@@ -196,6 +237,18 @@
       if (this.filePreview) this.filePreview.classList.add('hidden');
     }
 
+    renderCodeDigits(code) {
+      this.activeTransferCode = code;
+      if (this.shareCodeEl) this.shareCodeEl.textContent = code;
+      const digits = String(code).split('');
+      this.digitBoxes.forEach((box, index) => {
+        if (box) {
+          box.textContent = digits[index] || '-';
+          box.classList.add('filled');
+        }
+      });
+    }
+
     async startSending() {
       if (!this.currentFile) {
         showToast('Please select a file first', 'error');
@@ -203,24 +256,72 @@
       }
 
       this.createCodeBtn.disabled = true;
-      this.createCodeBtn.innerHTML = '<span>Generating...</span>';
+      this.createCodeBtn.innerHTML = '<span>Generating Session...</span>';
 
       try {
         this.webrtc = new WebRTCManager();
-        this.bindWebRTCEvents(this.webrtc, true);
+        this.bindWebRTCSenderEvents(this.webrtc);
 
         const code = await this.webrtc.createTransfer(this.currentFile);
-        this.shareCodeEl.textContent = code;
+        this.renderCodeDigits(code);
+
         this.filePreview.classList.add('hidden');
         this.sharingPanel.classList.remove('hidden');
-        showToast(`Code generated: ${code}`, 'success');
+        if (this.downloadsBadge) this.downloadsBadge.textContent = '0 downloads completed';
+        if (this.sendStatusEl) this.sendStatusEl.textContent = 'Ready for receivers • Code active';
+        showToast(`Share session live: ${code}`, 'success');
       } catch (error) {
         console.error('Failed to create transfer:', error);
         showToast(error.message || 'Failed to create transfer', 'error');
       } finally {
         this.createCodeBtn.disabled = false;
-        this.createCodeBtn.innerHTML = `<span>Generate Code</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`;
+        this.createCodeBtn.innerHTML = `<span>Generate Share Code</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
       }
+    }
+
+    bindWebRTCSenderEvents(manager) {
+      manager.on('receiver-joined', ({ receiverId, count }) => {
+        if (this.sendStatusEl) {
+          this.sendStatusEl.textContent = `Streaming to device (${count} connected)...`;
+        }
+        if (this.sendStatusRipple) {
+          this.sendStatusRipple.className = 'status-ripple active';
+        }
+        if (this.sendProgressEl) this.sendProgressEl.classList.remove('hidden');
+        this.transferStartTime = Date.now();
+      });
+
+      manager.on('progress', (progress) => {
+        const elapsed = (Date.now() - this.transferStartTime) / 1000;
+        const bytes = progress.bytesTransferred || 0;
+        const speed = elapsed > 0 ? bytes / elapsed : 0;
+
+        if (this.sendProgressEl) this.sendProgressEl.classList.remove('hidden');
+        if (this.progressFill) this.progressFill.style.width = progress.percent + '%';
+        if (this.progressPercentEl) this.progressPercentEl.textContent = Math.round(progress.percent) + '%';
+        if (this.progressSpeedEl) this.progressSpeedEl.textContent = formatSpeed(speed);
+      });
+
+      manager.on('receiver-completed', ({ downloadsCount }) => {
+        const plural = downloadsCount === 1 ? 'download' : 'downloads';
+        if (this.downloadsBadge) {
+          this.downloadsBadge.textContent = `${downloadsCount} ${plural} completed`;
+          this.downloadsBadge.classList.add('highlight-badge');
+        }
+        if (this.sendStatusEl) {
+          this.sendStatusEl.textContent = `✓ Download finished! Code remains live for more devices.`;
+        }
+        if (this.sendStatusRipple) {
+          this.sendStatusRipple.className = 'status-ripple waiting';
+        }
+        if (this.progressFill) this.progressFill.style.width = '100%';
+        if (this.progressPercentEl) this.progressPercentEl.textContent = '100%';
+        showToast(`Device downloaded file! (${downloadsCount} total)`, 'success');
+      });
+
+      manager.on('error', (error) => {
+        showToast(error.message || 'Stream notice', 'error');
+      });
     }
 
     async startReceiving() {
@@ -235,7 +336,7 @@
 
       try {
         this.webrtc = new WebRTCManager();
-        this.bindWebRTCEvents(this.webrtc, false);
+        this.bindWebRTCReceiverEvents(this.webrtc);
 
         const fileInfo = await this.webrtc.joinTransfer(code);
         this.inputSection.classList.add('hidden');
@@ -250,26 +351,18 @@
         showToast(error.message || 'Failed to connect. Check code and try again.', 'error');
       } finally {
         this.connectBtn.disabled = false;
-        this.connectBtn.innerHTML = `<span>Connect</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>`;
+        this.connectBtn.innerHTML = `<span>Connect & Download</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
       }
     }
 
-    bindWebRTCEvents(manager, isSender) {
+    bindWebRTCReceiverEvents(manager) {
       this.transferStartTime = Date.now();
-
-      manager.on('status', (message) => {
-        if (isSender && this.sendStatusEl) {
-          this.sendStatusEl.textContent = message;
-        } else if (!isSender && this.receiveStatusEl) {
-          this.receiveStatusEl.textContent = message;
-        }
-      });
 
       manager.on('connected', () => {
         if (this.connectionStatusEl) this.connectionStatusEl.textContent = 'Direct P2P Connected';
-        if (!isSender && this.receiveStatusEl) {
-          this.receiveStatusEl.textContent = 'Receiving stream...';
-        }
+        if (this.receiveStatusEl) this.receiveStatusEl.textContent = 'Receiving stream...';
+        if (this.receiveStatusRipple) this.receiveStatusRipple.className = 'status-ripple active';
+        if (this.receiveProgressEl) this.receiveProgressEl.classList.remove('hidden');
       });
 
       manager.on('progress', (progress) => {
@@ -277,68 +370,90 @@
         const bytes = progress.bytesTransferred || 0;
         const speed = elapsed > 0 ? bytes / elapsed : 0;
 
-        if (isSender) {
-          if (this.sendProgressEl) this.sendProgressEl.classList.remove('hidden');
-          if (this.progressFill) this.progressFill.style.width = progress.percent + '%';
-          if (this.progressPercentEl) this.progressPercentEl.textContent = Math.round(progress.percent) + '%';
-          if (this.progressSpeedEl) this.progressSpeedEl.textContent = formatSpeed(speed);
-        } else {
-          if (this.receiveProgressEl) this.receiveProgressEl.classList.remove('hidden');
-          if (this.receiveProgressFill) this.receiveProgressFill.style.width = progress.percent + '%';
-          if (this.receivePercentEl) this.receivePercentEl.textContent = Math.round(progress.percent) + '%';
-          if (this.receiveSpeedEl) this.receiveSpeedEl.textContent = formatSpeed(speed);
-        }
+        if (this.receiveProgressEl) this.receiveProgressEl.classList.remove('hidden');
+        if (this.receiveProgressFill) this.receiveProgressFill.style.width = progress.percent + '%';
+        if (this.receivePercentEl) this.receivePercentEl.textContent = Math.round(progress.percent) + '%';
+        if (this.receiveSpeedEl) this.receiveSpeedEl.textContent = formatSpeed(speed);
       });
 
       manager.on('complete', () => {
-        if (isSender) {
-          if (this.sendStatusEl) this.sendStatusEl.textContent = '✓ File transferred successfully!';
-          showToast('File sent successfully!', 'success');
-        } else {
-          if (this.receiveStatusEl) this.receiveStatusEl.textContent = '✓ Download completed!';
-          showToast('File downloaded successfully!', 'success');
-        }
-        if (this.connectionStatusEl) this.connectionStatusEl.textContent = 'Transfer Complete';
+        if (this.receiveStatusEl) this.receiveStatusEl.textContent = '✓ File downloaded successfully!';
+        if (this.receiveStatusRipple) this.receiveStatusRipple.className = 'status-ripple complete';
+        if (this.connectionStatusEl) this.connectionStatusEl.textContent = 'Download Complete';
+        showToast('File downloaded successfully!', 'success');
       });
 
       manager.on('error', (error) => {
-        showToast(error.message || 'Transfer interrupted', 'error');
-        this.cancelTransfer();
+        showToast(error.message || 'Connection interrupted', 'error');
+        this.cancelReceive();
       });
     }
 
     copyCode() {
-      const code = this.shareCodeEl.textContent;
+      const code = this.activeTransferCode || this.shareCodeEl.textContent;
       if (!code) return;
 
       navigator.clipboard.writeText(code).then(() => {
         this.copyCodeBtn.classList.add('copied');
-        setTimeout(() => this.copyCodeBtn.classList.remove('copied'), 2000);
+        this.copyCodeBtn.querySelector('span').textContent = 'Copied!';
+        setTimeout(() => {
+          this.copyCodeBtn.classList.remove('copied');
+          this.copyCodeBtn.querySelector('span').textContent = 'Copy Code';
+        }, 2000);
         showToast('Code copied to clipboard!', 'success');
       }).catch(() => {
         showToast('Code: ' + code, 'success');
       });
     }
 
-    cancelTransfer() {
+    copyShareLink() {
+      const code = this.activeTransferCode || this.shareCodeEl.textContent;
+      if (!code) return;
+
+      const url = `${window.location.origin}/?code=${code}`;
+      navigator.clipboard.writeText(url).then(() => {
+        this.copyLinkBtn.classList.add('copied');
+        this.copyLinkBtn.querySelector('span').textContent = 'Link Copied!';
+        setTimeout(() => {
+          this.copyLinkBtn.classList.remove('copied');
+          this.copyLinkBtn.querySelector('span').textContent = 'Copy Link';
+        }, 2000);
+        showToast('Share link copied to clipboard!', 'success');
+      }).catch(() => {
+        showToast('Share link: ' + url, 'success');
+      });
+    }
+
+    async stopSharing() {
+      if (this.webrtc) {
+        await this.webrtc.stopSharing();
+        this.webrtc = null;
+      }
+
+      this.activeTransferCode = null;
+      if (this.sharingPanel) this.sharingPanel.classList.add('hidden');
+      if (this.sendProgressEl) this.sendProgressEl.classList.add('hidden');
+      this.clearFile();
+
+      if (this.connectionStatusEl) this.connectionStatusEl.textContent = 'Ready';
+      if (this.sendStatusEl) this.sendStatusEl.textContent = 'Ready for receivers • Code active';
+      showToast('Sharing session ended', 'info');
+    }
+
+    cancelReceive() {
       if (this.webrtc) {
         this.webrtc.cancel();
         this.webrtc = null;
       }
 
-      if (this.sharingPanel) this.sharingPanel.classList.add('hidden');
       if (this.receivingPanel) this.receivingPanel.classList.add('hidden');
       if (this.inputSection) this.inputSection.classList.remove('hidden');
-      if (this.sendProgressEl) this.sendProgressEl.classList.add('hidden');
       if (this.receiveProgressEl) this.receiveProgressEl.classList.add('hidden');
 
       if (this.codeInput) this.codeInput.value = '';
       if (this.connectBtn) this.connectBtn.disabled = true;
 
-      this.clearFile();
-
       if (this.connectionStatusEl) this.connectionStatusEl.textContent = 'Ready';
-      if (this.sendStatusEl) this.sendStatusEl.textContent = 'Waiting for receiver...';
       if (this.receiveStatusEl) this.receiveStatusEl.textContent = 'Connecting...';
     }
   }

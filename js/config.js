@@ -28,27 +28,43 @@
   }
 
   const defaultIceServers = [
+    // High-Availability Google STUN (IPv4 & IPv6 Dual-Stack Anycast)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    // Cloudflare STUN
     { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'stun:stun.services.mozilla.com:3478' },
+    // Twilio Global STUN
     { urls: 'stun:global.stun.twilio.com:3478' },
-    // OpenRelay Public TURN servers for universal NAT & firewall traversal
+    // Nextcloud Port 443 STUN (bypasses restrictive network filters)
+    { urls: 'stun:stun.nextcloud.com:443' },
+    { urls: 'stun:stun.syncthing.net:3478' },
+    { urls: 'stun:stun.services.mozilla.com:3478' },
+
+    // OpenRelay Public TURN Relay (UDP, TCP, and TLS on Ports 80 & 443 for Mobile Carrier CGNAT & Symmetric NAT Traversal)
     {
-      urls: 'turn:openrelay.metered.ca:80',
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+        'turns:openrelay.metered.ca:443?transport=tcp',
+        'turns:openrelay.metered.ca:443',
+        'turns:openrelay.metered.ca:80'
+      ],
       username: 'openrelay',
       credential: 'openrelay'
     },
     {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelay',
-      credential: 'openrelay'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      urls: [
+        'turn:relay.metered.ca:80',
+        'turn:relay.metered.ca:80?transport=tcp',
+        'turn:relay.metered.ca:443',
+        'turn:relay.metered.ca:443?transport=tcp',
+        'turns:relay.metered.ca:443?transport=tcp'
+      ],
       username: 'openrelay',
       credential: 'openrelay'
     }
@@ -66,27 +82,37 @@
     .filter(Boolean)
     .map(url => ({ urls: url }));
 
-  // Merge custom STUN and TURN with high-availability fallbacks
+  // Crucial: always ensure STUN and multi-transport TURN are merged
   const iceServers = [
     ...(customStuns.length > 0 ? customStuns : [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' }
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:stun.nextcloud.com:443' }
     ]),
     ...(customTurns.length > 0 ? customTurns : [
       {
-        urls: 'turn:openrelay.metered.ca:80',
+        urls: [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443',
+          'turns:openrelay.metered.ca:80'
+        ],
         username: 'openrelay',
         credential: 'openrelay'
       },
       {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelay',
-        credential: 'openrelay'
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        urls: [
+          'turn:relay.metered.ca:80',
+          'turn:relay.metered.ca:80?transport=tcp',
+          'turn:relay.metered.ca:443',
+          'turn:relay.metered.ca:443?transport=tcp',
+          'turns:relay.metered.ca:443?transport=tcp'
+        ],
         username: 'openrelay',
         credential: 'openrelay'
       }
@@ -125,10 +151,13 @@
     MAX_FILE_SIZE: parseInt(getEnvVar('MAX_FILE_SIZE'), 10) || 10 * 1024 * 1024 * 1024, // 10GB
     CODE_EXPIRY: parseInt(getEnvVar('CODE_EXPIRY'), 10) || 24 * 60 * 60 * 1000, // 24 hours
     MAX_TRANSFER_DURATION: 2 * 60 * 60 * 1000, // 2 hours
-    ICE_SERVERS: iceServers.length > 0 ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }],
+    ICE_SERVERS: iceServers.length > 0 ? iceServers : defaultIceServers,
     RTC_PEER_CONFIG: {
-      iceServers: iceServers.length > 0 ? iceServers : [{ urls: 'stun:stun.l.google.com:19302' }],
-      iceCandidatePoolSize: 5
+      iceServers: iceServers.length > 0 ? iceServers : defaultIceServers,
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
     },
 
     // Rate Limiting

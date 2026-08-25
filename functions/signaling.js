@@ -1,9 +1,6 @@
 /**
  * Netlify Serverless Function: Fallback AJAX Signaling Service
- * Provides in-memory / ephemeral signaling when Firebase Firestore is unreachable or blocked.
- * 
- * Endpoints via POST /.netlify/functions/signaling with body:
- * { action: 'create' | 'join' | 'offer' | 'answer' | 'candidate' | 'poll' | 'complete' | 'cancel', ... }
+ * Multi-device persistent signaling service for high-concurrency P2P transfers.
  */
 
 // Ephemeral in-memory store for signaling sessions
@@ -72,12 +69,13 @@ exports.handler = async function(event, context) {
       sessions.set(code, {
         code,
         senderId: peerId,
-        receiverId: null,
+        receivers: [],
         fileInfo,
-        status: 'waiting',
+        status: 'sharing',
         offers: [],
         answers: [],
         candidates: [],
+        downloadsCount: 0,
         createdAt: Date.now(),
         expiresAt: Date.now() + SESSION_TTL
       });
@@ -99,8 +97,11 @@ exports.handler = async function(event, context) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found or expired' }) };
       }
 
-      session.receiverId = peerId;
-      session.status = 'active';
+      if (!session.receivers.includes(peerId)) {
+        session.receivers.push(peerId);
+      }
+      session.receiverId = peerId; // Latest receiver for legacy support
+      session.status = 'sharing';
 
       return {
         statusCode: 200,
@@ -120,7 +121,7 @@ exports.handler = async function(event, context) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
       }
 
-      session.offers.push({ from: peerId, to, sdp: offer.sdp, type: offer.type, timestamp: Date.now() });
+      session.offers.push({ from: peerId, to: to || '', sdp: offer.sdp, type: offer.type, timestamp: Date.now() });
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
     }
 
@@ -131,7 +132,7 @@ exports.handler = async function(event, context) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
       }
 
-      session.answers.push({ from: peerId, to, sdp: answer.sdp, type: answer.type, timestamp: Date.now() });
+      session.answers.push({ from: peerId, to: to || '', sdp: answer.sdp, type: answer.type, timestamp: Date.now() });
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
     }
 
@@ -152,7 +153,7 @@ exports.handler = async function(event, context) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
       }
 
-      // Return items meant for this peer from the other peer
+      // Return items targeted for this peer or from other peers
       const offers = session.offers.filter(o => o.from !== peerId && (!o.to || o.to === peerId));
       const answers = session.answers.filter(a => a.from !== peerId && (!a.to || a.to === peerId));
       const candidates = session.candidates.filter(c => c.from !== peerId && (!c.to || c.to === peerId));
@@ -162,7 +163,9 @@ exports.handler = async function(event, context) {
         headers,
         body: JSON.stringify({
           status: session.status,
+          receivers: session.receivers,
           receiverId: session.receiverId,
+          downloadsCount: session.downloadsCount,
           offers,
           answers,
           candidates
@@ -170,7 +173,14 @@ exports.handler = async function(event, context) {
       };
     }
 
-    case 'complete':
+    case 'complete': {
+      const session = sessions.get(code);
+      if (session) {
+        session.downloadsCount = (session.downloadsCount || 0) + 1;
+      }
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, downloadsCount: session?.downloadsCount || 1 }) };
+    }
+
     case 'cancel': {
       sessions.delete(code);
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };

@@ -72,14 +72,21 @@ test('Serverless signaling function lifecycle: create -> join -> offer -> answer
   assert.strictEqual(senderPollBody.answers.length, 1);
   assert.strictEqual(senderPollBody.answers[0].sdp, 'fake-answer-sdp');
 
-  // 7. Complete transfer
+  // 7. Complete transfer for receiver
   const completeRes = await handler({
     httpMethod: 'POST',
     body: JSON.stringify({ action: 'complete', code })
   });
   assert.strictEqual(completeRes.statusCode, 200);
 
-  // 8. Subsequent poll returns 404
+  // 8. Sender cancels / stops sharing session
+  const cancelRes = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'cancel', code })
+  });
+  assert.strictEqual(cancelRes.statusCode, 200);
+
+  // 9. Subsequent poll returns 404
   const postCompletePoll = await handler({
     httpMethod: 'POST',
     body: JSON.stringify({ action: 'poll', code, peerId: senderId })

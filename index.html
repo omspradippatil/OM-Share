@@ -224,78 +224,131 @@
         <!-- Send Panel -->
         <div class="panel" id="panel-send">
           <div class="upload-zone" id="dropzone">
-            <div class="upload-icon">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <div class="upload-icon-wrapper">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="17 8 12 3 7 8"/>
                 <line x1="12" y1="3" x2="12" y2="15"/>
               </svg>
             </div>
-            <p class="upload-text">Drop file here or click to select</p>
-            <p class="upload-subtext">Any type • Any size</p>
+            <div class="upload-text-group">
+              <p class="upload-text">Drop your file here or <span class="browse-link">browse</span></p>
+              <p class="upload-subtext">Direct P2P • No cloud storage • Unlimited file size</p>
+            </div>
+            <div class="format-pills">
+              <span class="format-pill">PDF</span>
+              <span class="format-pill">MP4 / 4K</span>
+              <span class="format-pill">ZIP / RAR</span>
+              <span class="format-pill">IMG / RAW</span>
+              <span class="format-pill">10GB+</span>
+            </div>
             <input type="file" id="file-input" hidden>
           </div>
 
           <div class="file-preview hidden" id="file-preview">
-            <div class="file-info">
-              <div class="file-icon-wrapper">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <div class="file-info-card">
+              <div class="file-icon-box">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/>
                 </svg>
               </div>
-              <div class="file-details">
+              <div class="file-meta">
                 <p class="file-name" id="filename">document.pdf</p>
-                <p class="file-size" id="filesize">2.4 MB</p>
+                <div class="file-submeta">
+                  <span class="file-size-badge" id="filesize">2.4 MB</span>
+                  <span class="file-ready-tag">Ready to stream</span>
+                </div>
               </div>
-              <button class="btn-icon" id="remove-file" title="Remove">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <button class="btn-icon" id="remove-file" title="Change file">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
               </button>
             </div>
-            <button class="btn btn-primary" id="create-code">
-              <span>Generate Code</span>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="btn btn-primary btn-shine" id="create-code">
+              <span>Generate Share Code</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="9 18 15 12 9 6"/>
               </svg>
             </button>
           </div>
 
           <div class="sharing-panel hidden" id="sharing-panel">
-            <div class="code-display">
-              <p class="code-label">Share this code</p>
-              <div class="code-wrapper">
-                <span class="code" id="share-code">000000</span>
-                <button class="btn-copy" id="copy-code" title="Copy code">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <div class="sharing-session-header">
+              <div class="live-status-pill">
+                <span class="live-pulse-dot"></span>
+                <span>Active Share Session</span>
+              </div>
+              <span class="downloads-count-badge" id="downloads-badge">0 downloads completed</span>
+            </div>
+
+            <div class="code-card">
+              <p class="code-instructions">Enter this 6-digit code on receiving devices:</p>
+              <div class="code-boxes" id="code-boxes-container">
+                <span class="code-digit" id="digit-0">-</span>
+                <span class="code-digit" id="digit-1">-</span>
+                <span class="code-digit" id="digit-2">-</span>
+                <span class="code-digit" id="digit-3">-</span>
+                <span class="code-digit" id="digit-4">-</span>
+                <span class="code-digit" id="digit-5">-</span>
+              </div>
+              <span class="code-raw hidden" id="share-code">000000</span>
+
+              <div class="sharing-actions">
+                <button class="btn-action" id="copy-code" title="Copy 6-digit code">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                   </svg>
+                  <span>Copy Code</span>
+                </button>
+                <button class="btn-action" id="copy-link" title="Copy instant share URL">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                  </svg>
+                  <span>Copy Link</span>
                 </button>
               </div>
             </div>
-            <div class="status">
-              <div class="status-icon waiting"></div>
-              <p class="status-text" id="send-status">Waiting for receiver...</p>
-            </div>
-            <div class="progress hidden" id="send-progress">
-              <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill"></div>
+
+            <div class="transfer-hud">
+              <div class="status-indicator">
+                <div class="status-ripple waiting" id="send-status-ripple"></div>
+                <p class="status-msg" id="send-status">Ready for receivers • Code remains active</p>
               </div>
-              <div class="progress-info">
-                <span id="progress-percent">0%</span>
-                <span id="progress-speed"></span>
+              <div class="progress-container hidden" id="send-progress">
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-metrics">
+                  <span class="metric-percent" id="progress-percent">0%</span>
+                  <span class="metric-speed" id="progress-speed">0 MB/s</span>
+                </div>
               </div>
             </div>
-            <button class="btn btn-secondary" id="cancel-send">Cancel</button>
+
+            <div class="sharing-controls">
+              <p class="persistent-hint">💡 Code stays active for multiple downloads until you stop sharing.</p>
+              <button class="btn btn-danger-outline" id="stop-sharing">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                </svg>
+                <span>Stop Sharing</span>
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Receive Panel -->
         <div class="panel active" id="panel-receive">
           <div class="input-section" id="input-section">
-            <label class="input-label">Enter 6-digit code</label>
+            <div class="receive-header-group">
+              <h3 class="receive-title">Receive Files Directly</h3>
+              <p class="receive-subtitle">Enter the 6-digit code provided by the sender</p>
+            </div>
+            
             <div class="code-input-wrapper">
               <input
                 type="text"
@@ -305,43 +358,54 @@
                 maxlength="6"
                 inputmode="numeric"
                 autocomplete="off"
+                spellcheck="false"
               >
             </div>
-            <button class="btn btn-primary" id="connect-btn" disabled>
-              <span>Connect</span>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
+
+            <button class="btn btn-primary btn-shine" id="connect-btn" disabled>
+              <span>Connect & Download</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
             </button>
           </div>
 
           <div class="receiving-panel hidden" id="receiving-panel">
-            <div class="incoming-file">
-              <div class="file-icon-wrapper large">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <div class="incoming-file-card">
+              <div class="incoming-icon-box">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/>
                 </svg>
               </div>
-              <div class="incoming-details">
+              <div class="incoming-meta">
                 <p class="incoming-name" id="incoming-name">filename.pdf</p>
-                <p class="incoming-size" id="incoming-size">2.4 MB</p>
+                <div class="incoming-submeta">
+                  <span class="file-size-badge" id="incoming-size">2.4 MB</span>
+                  <span class="stream-badge">Encrypted P2P Stream</span>
+                </div>
               </div>
             </div>
-            <div class="status">
-              <div class="status-icon waiting"></div>
-              <p class="status-text" id="receive-status">Connecting...</p>
-            </div>
-            <div class="progress hidden" id="receive-progress">
-              <div class="progress-bar">
-                <div class="progress-fill" id="receive-progress-fill"></div>
+
+            <div class="transfer-hud">
+              <div class="status-indicator">
+                <div class="status-ripple waiting" id="receive-status-ripple"></div>
+                <p class="status-msg" id="receive-status">Connecting to sender...</p>
               </div>
-              <div class="progress-info">
-                <span id="receive-percent">0%</span>
-                <span id="receive-speed"></span>
+              <div class="progress-container hidden" id="receive-progress">
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" id="receive-progress-fill"></div>
+                </div>
+                <div class="progress-metrics">
+                  <span class="metric-percent" id="receive-percent">0%</span>
+                  <span class="metric-speed" id="receive-speed">0 MB/s</span>
+                </div>
               </div>
             </div>
-            <button class="btn btn-secondary" id="cancel-receive">Cancel</button>
+
+            <button class="btn btn-secondary" id="cancel-receive">Cancel Transfer</button>
           </div>
         </div>
       </main>

@@ -280,6 +280,17 @@
                     }
                   });
                 }
+
+                // Receiver listens for incoming relay chunks in real-time
+                if (data.chunks && Array.isArray(data.chunks) && handlers.onRelayChunk) {
+                    if (ch.to && ch.to !== peerId) return;
+                    const key = `${ch.chunkIndex}_${ch.timestamp || ''}`;
+                    if (!this.processedChunkIndices.has(key)) {
+                      this.processedChunkIndices.add(key);
+                      handlers.onRelayChunk(ch);
+                    }
+                  });
+                }
               }
             },
             (err) => {
@@ -398,14 +409,13 @@
     /**
      * Receiver requests relay fallback when WebRTC P2P handshake cannot punch through strict NAT
      */
-    async requestRelay(code, receiverId) {
+    async requestRelay(code, receiverId, handlers) {
       console.log(`[Signaling] Requesting relay fallback for receiver ${receiverId}`);
       if (!this.useAjaxFallback && this.firebaseInitialized && this.db) {
         try {
           await this.db.collection('transfers').doc(code).update({
             relayRequests: firebase.firestore.FieldValue.arrayUnion(receiverId)
           });
-          return;
         } catch (e) {}
       }
 
@@ -414,6 +424,10 @@
         code,
         peerId: receiverId
       }).catch(() => {});
+
+      if (handlers) {
+        this.startFastPolling(code, receiverId, false, handlers, 80);
+      }
     }
 
     /**

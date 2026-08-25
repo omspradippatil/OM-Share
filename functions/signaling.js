@@ -1,6 +1,6 @@
 /**
- * Netlify Serverless Function: Fallback AJAX Signaling Service
- * Multi-device persistent signaling service for high-concurrency P2P transfers.
+ * Netlify Serverless Function: Fallback AJAX & Relay Signaling Service
+ * Multi-device persistent signaling service with guaranteed serverless relay fallback.
  */
 
 // Ephemeral in-memory store for signaling sessions
@@ -75,6 +75,8 @@ exports.handler = async function(event, context) {
         offers: [],
         answers: [],
         candidates: [],
+        relayRequests: [],
+        chunks: [],
         downloadsCount: 0,
         createdAt: Date.now(),
         expiresAt: Date.now() + SESSION_TTL
@@ -100,7 +102,7 @@ exports.handler = async function(event, context) {
       if (!session.receivers.includes(peerId)) {
         session.receivers.push(peerId);
       }
-      session.receiverId = peerId; // Latest receiver for legacy support
+      session.receiverId = peerId;
       session.status = 'sharing';
 
       return {
@@ -147,16 +149,51 @@ exports.handler = async function(event, context) {
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
     }
 
+    case 'request-relay': {
+      const session = sessions.get(code);
+      if (!session) {
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
+      }
+
+      if (!session.relayRequests) session.relayRequests = [];
+      if (!session.relayRequests.includes(peerId)) {
+        session.relayRequests.push(peerId);
+      }
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+    }
+
+    case 'chunk': {
+      const { to, chunkIndex, totalChunks, data, completed } = payload;
+      const session = sessions.get(code);
+      if (!session) {
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
+      }
+
+      if (!session.chunks) session.chunks = [];
+      session.chunks.push({
+        from: peerId,
+        to: to || '',
+        chunkIndex,
+        totalChunks,
+        data,
+        completed: Boolean(completed),
+        timestamp: Date.now()
+      });
+
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+    }
+
     case 'poll': {
       const session = sessions.get(code);
       if (!session) {
         return { statusCode: 404, headers, body: JSON.stringify({ error: 'Transfer not found' }) };
       }
 
-      // Return items targeted for this peer or from other peers
-      const offers = session.offers.filter(o => o.from !== peerId && (!o.to || o.to === peerId));
-      const answers = session.answers.filter(a => a.from !== peerId && (!a.to || a.to === peerId));
-      const candidates = session.candidates.filter(c => c.from !== peerId && (!c.to || c.to === peerId));
+      const offers = (session.offers || []).filter(o => o.from !== peerId && (!o.to || o.to === peerId));
+      const answers = (session.answers || []).filter(a => a.from !== peerId && (!a.to || a.to === peerId));
+      const candidates = (session.candidates || []).filter(c => c.from !== peerId && (!c.to || c.to === peerId));
+      const relayRequests = session.relayRequests || [];
+      const incomingChunks = (session.chunks || []).filter(ch => ch.from !== peerId && (!ch.to || ch.to === peerId));
 
       return {
         statusCode: 200,
@@ -168,7 +205,9 @@ exports.handler = async function(event, context) {
           downloadsCount: session.downloadsCount,
           offers,
           answers,
-          candidates
+          candidates,
+          relayRequests,
+          chunks: incomingChunks
         })
       };
     }
@@ -177,6 +216,8 @@ exports.handler = async function(event, context) {
       const session = sessions.get(code);
       if (session) {
         session.downloadsCount = (session.downloadsCount || 0) + 1;
+        // Clean up relay chunks for memory efficiency
+        session.chunks = [];
       }
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, downloadsCount: session?.downloadsCount || 1 }) };
     }

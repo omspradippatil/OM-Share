@@ -137,6 +137,58 @@ test('E2E Simulation: Full Serverless Handshake with Candidate Sanitization and 
   assert.strictEqual(postCancelPoll.statusCode, 404);
 });
 
+test('Relay Fallback Streaming Simulation: request-relay -> chunk -> poll -> complete', async () => {
+  const code = '555666';
+  const senderId = 'peer_sender_relay_1';
+  const receiverId = 'peer_receiver_relay_2';
+  const fileInfo = { name: 'photo.jpg', size: 1024, type: 'image/jpeg', totalChunks: 1 };
+
+  await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'create', code, peerId: senderId, fileInfo })
+  });
+
+  await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'join', code, peerId: receiverId })
+  });
+
+  // Receiver requests relay
+  const relayReq = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'request-relay', code, peerId: receiverId })
+  });
+  assert.strictEqual(relayReq.statusCode, 200);
+
+  // Sender streams chunk via relay
+  const chunkRes = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({
+      action: 'chunk',
+      code,
+      peerId: senderId,
+      to: receiverId,
+      chunkIndex: 0,
+      totalChunks: 1,
+      data: Buffer.from('TEST RELAY DATA').toString('base64'),
+      completed: true
+    })
+  });
+  assert.strictEqual(chunkRes.statusCode, 200);
+
+  // Receiver polls and receives chunk
+  const pollRes = await handler({
+    httpMethod: 'POST',
+    body: JSON.stringify({ action: 'poll', code, peerId: receiverId })
+  });
+  assert.strictEqual(pollRes.statusCode, 200);
+  const pollData = JSON.parse(pollRes.body);
+  assert.strictEqual(pollData.chunks.length, 1);
+  assert.strictEqual(pollData.chunks[0].chunkIndex, 0);
+  assert.strictEqual(pollData.chunks[0].completed, true);
+  assert.strictEqual(Buffer.from(pollData.chunks[0].data, 'base64').toString(), 'TEST RELAY DATA');
+});
+
 test('WebRTC & Chunk Streaming Math Verification', () => {
   const manager = new WebRTCManager();
   assert.ok(manager.peerId.startsWith('peer_'));

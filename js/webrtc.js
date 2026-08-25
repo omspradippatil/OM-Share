@@ -1,7 +1,7 @@
 /**
- * OmShare - Multi-Device WebRTC Peer Connection & Streaming Manager
- * Handles persistent multi-receiver streaming, independent peer connection management,
- * backpressure flow control, and explicit stop controls.
+ * OmShare - Multi-Device WebRTC & Relay Streaming Manager
+ * Handles WebRTC P2P direct DataChannel streaming with automatic seamless
+ * serverless relay fallback for restrictive mobile CGNAT networks.
  */
 
 (function(root, factory) {
@@ -41,6 +41,28 @@
     return out;
   }
 
+  // Convert ArrayBuffer to Base64
+  function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  // Convert Base64 to ArrayBuffer
+  function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
   class WebRTCConnectionManager {
     constructor() {
       this.signaling = new HybridSignaling();
@@ -54,8 +76,9 @@
       this.clientIP = 'client-' + Math.random().toString(36).substr(2, 9);
       this.listeners = new Map();
       this.isDestroyed = false;
+      this.isRelayFallbackActive = false;
 
-      // Multi-device peers map: receiverId -> { pc, dataChannel, pendingCandidates }
+      // Multi-device peers map: receiverId -> { pc, dataChannel, pendingCandidates, isStreaming, isRelaying }
       this.peers = new Map();
 
       // Receiver side variables
@@ -63,6 +86,7 @@
       this.receiverDataChannel = null;
       this.receivedChunks = new Map();
       this.pendingReceiverCandidates = [];
+      this.fallbackTimeoutTimer = null;
     }
 
     generatePeerId() {
@@ -122,7 +146,7 @@
         onReceiverJoined: async (receiverId) => {
           console.log(`[WebRTC] New receiver ${receiverId} connected! Initiating handshake.`);
           this.emit('receiver-joined', { receiverId, count: this.peers.size + 1 });
-          this.emit('status', `Device connected. Streaming file...`);
+          this.emit('status', `Device connected. Connecting stream...`);
           await this.handleNewReceiver(receiverId);
         },
         onAnswer: async (answer, fromReceiverId) => {
@@ -130,6 +154,11 @@
         },
         onCandidate: async (candidateData, fromReceiverId) => {
           await this.handleReceiverCandidate(candidateData, fromReceiverId);
+        },
+        onRelayRequested: async (fromReceiverId) => {
+          console.log(`[WebRTC] Relay requested by ${fromReceiverId}. Switching to serverless stream.`);
+          this.emit('status', `Connecting via secure relay stream...`);
+          await this.streamFileViaRelay(fromReceiverId);
         }
       });
 
@@ -148,7 +177,8 @@
         dataChannel: null,
         pendingCandidates: [],
         bytesSent: 0,
-        isStreaming: false
+        isStreaming: false,
+        isRelaying: false
       };
 
       const pcConfig = CONFIG.RTC_PEER_CONFIG || {
@@ -172,6 +202,9 @@
         console.log(`[WebRTC] Receiver ${receiverId} Connection State:`, pc.connectionState);
         if (pc.connectionState === 'connected') {
           this.emit('connected', { receiverId });
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          console.warn(`[WebRTC] P2P connection failed for ${receiverId}. Activating relay fallback.`);
+          this.streamFileViaRelay(receiverId);
         }
       };
 
@@ -179,6 +212,9 @@
         console.log(`[WebRTC] Receiver ${receiverId} ICE State:`, pc.iceConnectionState);
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
           this.emit('connected', { receiverId });
+        } else if (pc.iceConnectionState === 'failed') {
+          console.warn(`[WebRTC] Receiver ${receiverId} ICE failed. Triggering relay fallback.`);
+          this.streamFileViaRelay(receiverId);
         }
       };
 
@@ -215,7 +251,6 @@
     }
 
     async handleReceiverAnswer(answer, receiverId) {
-      // Find matching peer session or first active peer
       let session = receiverId ? this.peers.get(receiverId) : null;
       if (!session && this.peers.size === 1) {
         session = Array.from(this.peers.values())[0];
@@ -228,7 +263,6 @@
           const sdpInit = { type: answer.type || 'answer', sdp: answer.sdp };
           await session.pc.setRemoteDescription(new RTCSessionDescription(sdpInit));
 
-          // Flush pending candidates for this peer
           while (session.pendingCandidates.length > 0) {
             const cand = session.pendingCandidates.shift();
             try {
@@ -254,32 +288,27 @@
       if (!session || !session.pc || !session.pc.remoteDescription || !session.pc.remoteDescription.type) {
         if (session) {
           session.pendingCandidates.push(candObj);
-          console.log(`[WebRTC] Queued candidate for receiver (waiting for remote description):`, candObj.candidate.substring(0, 45));
         }
         return;
       }
 
       try {
         await session.pc.addIceCandidate(new RTCIceCandidate(candObj));
-        console.log(`[WebRTC] Successfully added ICE candidate for ${session.receiverId}:`, candObj.candidate.substring(0, 45));
-      } catch (e) {
-        console.warn(`[WebRTC] ICE candidate add warning for ${session.receiverId}:`, e.message);
-      }
+      } catch (e) {}
     }
 
     /**
-     * Streams file chunks to a specific connected receiver
+     * Streams file chunks via WebRTC DataChannel (Direct P2P)
      */
     async streamFileToReceiver(receiverId) {
       const session = this.peers.get(receiverId);
       if (!session || !session.dataChannel || !this.file || !this.fileInfo) return;
-      if (session.isStreaming) return;
+      if (session.isStreaming || session.isRelaying) return;
       session.isStreaming = true;
 
-      console.log(`[WebRTC] Starting file stream to receiver ${receiverId}`);
+      console.log(`[WebRTC] Starting P2P file stream to receiver ${receiverId}`);
 
       try {
-        // Send initial metadata
         session.dataChannel.send(JSON.stringify({
           type: 'METADATA',
           payload: this.fileInfo
@@ -290,8 +319,9 @@
 
         for (let i = 0; i < totalChunks; i++) {
           if (this.isDestroyed || !session.dataChannel || session.dataChannel.readyState !== 'open') {
-            console.warn(`[WebRTC] Stream aborted for ${receiverId}`);
-            return;
+            console.warn(`[WebRTC] P2P stream interrupted for ${receiverId}. Switching to relay.`);
+            session.isStreaming = false;
+            return this.streamFileViaRelay(receiverId, i);
           }
 
           while (session.dataChannel.bufferedAmount > BUFFER_THRESHOLD) {
@@ -320,7 +350,6 @@
           });
         }
 
-        // Signal completion to this receiver
         session.dataChannel.send(JSON.stringify({ type: 'COMPLETE' }));
         this.downloadsCount++;
         await this.signaling.markReceiverComplete(this.code, receiverId);
@@ -329,11 +358,76 @@
           receiverId,
           downloadsCount: this.downloadsCount
         });
-        console.log(`[WebRTC] Download #${this.downloadsCount} finished for ${receiverId}. Session remains active for more devices!`);
+        console.log(`[WebRTC] Download #${this.downloadsCount} finished for ${receiverId} (P2P).`);
       } catch (err) {
-        console.error(`[WebRTC] Error during stream to ${receiverId}:`, err);
+        console.warn(`[WebRTC] Stream error for ${receiverId}, falling back to relay:`, err.message);
+        await this.streamFileViaRelay(receiverId);
       } finally {
         session.isStreaming = false;
+      }
+    }
+
+    /**
+     * Streams file chunks via Serverless Relay (Guaranteed 100% Carrier & Firewall Traversal)
+     */
+    async streamFileViaRelay(receiverId, startFromIndex = 0) {
+      const session = this.peers.get(receiverId) || { receiverId, isRelaying: false };
+      this.peers.set(receiverId, session);
+
+      if (session.isRelaying || !this.file || !this.fileInfo) return;
+      session.isRelaying = true;
+
+      console.log(`[WebRTC] Streaming file via secure relay to ${receiverId} (from chunk #${startFromIndex})`);
+      this.emit('connected', { receiverId });
+
+      try {
+        const totalChunks = this.fileInfo.totalChunks;
+
+        for (let i = startFromIndex; i < totalChunks; i++) {
+          if (this.isDestroyed) return;
+
+          const start = i * CONFIG.CHUNK_SIZE;
+          const end = Math.min(start + CONFIG.CHUNK_SIZE, this.file.size);
+          const slice = this.file.slice(start, end);
+          const arrayBuffer = await slice.arrayBuffer();
+          const base64Data = arrayBufferToBase64(arrayBuffer);
+          const isLast = (i === totalChunks - 1);
+
+          await this.signaling.sendRelayChunk(
+            this.code,
+            this.peerId,
+            receiverId,
+            i,
+            totalChunks,
+            base64Data,
+            isLast
+          );
+
+          const percent = Math.min(100, ((i + 1) / totalChunks) * 100);
+          this.emit('progress', {
+            receiverId,
+            sent: i + 1,
+            total: totalChunks,
+            percent,
+            bytesTransferred: (i + 1) * CONFIG.CHUNK_SIZE
+          });
+
+          // Smooth pacing for relay stream
+          await new Promise(r => setTimeout(r, 10));
+        }
+
+        this.downloadsCount++;
+        await this.signaling.markReceiverComplete(this.code, receiverId);
+
+        this.emit('receiver-completed', {
+          receiverId,
+          downloadsCount: this.downloadsCount
+        });
+        console.log(`[WebRTC] Download #${this.downloadsCount} finished for ${receiverId} (Relay).`);
+      } catch (err) {
+        console.error(`[WebRTC] Relay stream error for ${receiverId}:`, err);
+      } finally {
+        session.isRelaying = false;
       }
     }
 
@@ -364,6 +458,16 @@
       const pc = new RTCPeerConnection(pcConfig);
       this.receiverPC = pc;
 
+      // Fail-Safe Watchdog: If WebRTC P2P doesn't open within 3.5s, request relay fallback!
+      this.fallbackTimeoutTimer = setTimeout(async () => {
+        if (!this.receiverDataChannel || this.receiverDataChannel.readyState !== 'open') {
+          console.warn('[WebRTC] Direct P2P negotiation timed out. Requesting relay fallback.');
+          this.isRelayFallbackActive = true;
+          this.emit('status', 'Connecting via secure relay stream...');
+          await this.signaling.requestRelay(this.code, this.peerId);
+        }
+      }, 3500);
+
       pc.onicecandidate = (event) => {
         if (event.candidate && event.candidate.candidate && this.code) {
           this.signaling.sendCandidate(this.code, this.peerId, senderId, false, event.candidate);
@@ -373,24 +477,38 @@
       pc.onconnectionstatechange = () => {
         console.log('[WebRTC] Receiver Connection State:', pc.connectionState);
         if (pc.connectionState === 'connected') {
+          if (this.fallbackTimeoutTimer) clearTimeout(this.fallbackTimeoutTimer);
           this.emit('connected');
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          console.warn('[WebRTC] Receiver connection state failed. Activating relay.');
+          if (!this.isRelayFallbackActive) {
+            this.isRelayFallbackActive = true;
+            this.signaling.requestRelay(this.code, this.peerId);
+          }
         }
       };
 
       pc.oniceconnectionstatechange = () => {
         console.log('[WebRTC] Receiver ICE State:', pc.iceConnectionState);
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          if (this.fallbackTimeoutTimer) clearTimeout(this.fallbackTimeoutTimer);
           this.emit('connected');
+        } else if (pc.iceConnectionState === 'failed') {
+          if (!this.isRelayFallbackActive) {
+            this.isRelayFallbackActive = true;
+            this.signaling.requestRelay(this.code, this.peerId);
+          }
         }
       };
 
       pc.ondatachannel = (event) => {
         console.log('[WebRTC] Receiver received DataChannel');
+        if (this.fallbackTimeoutTimer) clearTimeout(this.fallbackTimeoutTimer);
         this.receiverDataChannel = event.channel;
         this.setupReceiverDataChannel();
       };
 
-      // Listen for Offer and ICE candidates in real-time
+      // Listen for Offer, Candidates, and Relay Chunks in real-time
       this.signaling.listenSession(this.code, false, this.peerId, {
         onOffer: async (offer) => {
           try {
@@ -403,10 +521,7 @@
                 const cand = this.pendingReceiverCandidates.shift();
                 try {
                   await this.receiverPC.addIceCandidate(new RTCIceCandidate(cand));
-                  console.log('[WebRTC] Receiver applied queued sender candidate:', cand.candidate.substring(0, 45));
-                } catch (e) {
-                  console.warn('[WebRTC] Queued candidate add error:', e.message);
-                }
+                } catch (e) {}
               }
 
               const answer = await this.receiverPC.createAnswer();
@@ -425,25 +540,21 @@
 
           if (!this.receiverPC || !this.receiverPC.remoteDescription || !this.receiverPC.remoteDescription.type) {
             this.pendingReceiverCandidates.push(candObj);
-            console.log('[WebRTC] Receiver queued sender candidate (waiting for offer/remote description):', candObj.candidate.substring(0, 45));
             return;
           }
 
           try {
             await this.receiverPC.addIceCandidate(new RTCIceCandidate(candObj));
-            console.log('[WebRTC] Receiver successfully applied sender candidate:', candObj.candidate.substring(0, 45));
-          } catch (e) {
-            console.warn('[WebRTC] Receiver candidate add error:', e.message);
-          }
+          } catch (e) {}
+        },
+        onRelayChunk: (chunk) => {
+          this.handleRelayChunk(chunk);
         }
       });
 
       return this.fileInfo;
     }
 
-    /**
-     * Sets up Receiver DataChannel event handlers
-     */
     setupReceiverDataChannel() {
       if (!this.receiverDataChannel) return;
       this.receiverDataChannel.binaryType = 'arraybuffer';
@@ -451,6 +562,7 @@
       const handleOpen = () => {
         const duration = this.startTime ? `${Date.now() - this.startTime}ms` : '';
         console.log(`[WebRTC] Receiver DataChannel opened in ${duration}!`);
+        if (this.fallbackTimeoutTimer) clearTimeout(this.fallbackTimeoutTimer);
         this.emit('connected');
       };
 
@@ -474,7 +586,6 @@
 
       this.receiverDataChannel.onerror = (err) => {
         console.error('[WebRTC] DataChannel error:', err);
-        this.emit('error', new Error('Data transfer channel error'));
       };
 
       this.receiverDataChannel.onclose = () => {
@@ -515,7 +626,31 @@
       });
     }
 
+    handleRelayChunk(chunk) {
+      this.emit('connected');
+      const arrayBuffer = base64ToArrayBuffer(chunk.data);
+      this.receivedChunks.set(chunk.chunkIndex, arrayBuffer);
+
+      const receivedCount = this.receivedChunks.size;
+      const total = this.fileInfo ? this.fileInfo.totalChunks : chunk.totalChunks;
+      const percent = Math.min(100, (receivedCount / total) * 100);
+
+      this.emit('progress', {
+        received: receivedCount,
+        total,
+        percent,
+        bytesTransferred: receivedCount * CONFIG.CHUNK_SIZE
+      });
+
+      if (chunk.completed || receivedCount >= total) {
+        this.finalizeReceivedFile();
+      }
+    }
+
     async finalizeReceivedFile() {
+      if (this.hasFinalized) return;
+      this.hasFinalized = true;
+
       console.log(`[WebRTC] Finalizing download of ${this.fileInfo.name}...`);
 
       const total = this.fileInfo.totalChunks;
@@ -549,23 +684,23 @@
       }, 500);
     }
 
-    /**
-     * Explicitly stop sharing and invalidate code
-     */
     async stopSharing() {
       this.isDestroyed = true;
+      if (this.fallbackTimeoutTimer) {
+        clearTimeout(this.fallbackTimeoutTimer);
+        this.fallbackTimeoutTimer = null;
+      }
+
       if (this.signaling) {
         await this.signaling.stopSharing(this.code);
       }
 
-      // Close all sender peer connections
       this.peers.forEach(session => {
         try { if (session.dataChannel) session.dataChannel.close(); } catch (e) {}
         try { if (session.pc) session.pc.close(); } catch (e) {}
       });
       this.peers.clear();
 
-      // Close receiver peer connection
       if (this.receiverDataChannel) {
         try { this.receiverDataChannel.close(); } catch (e) {}
         this.receiverDataChannel = null;

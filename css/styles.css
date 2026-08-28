@@ -599,7 +599,7 @@ body {
 
 .sharing-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
 }
 
@@ -608,12 +608,12 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: var(--bg-pill);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -629,6 +629,49 @@ body {
   background: rgba(16, 185, 129, 0.15);
   border-color: var(--brand-emerald);
   color: var(--brand-emerald);
+}
+
+.btn-action.active-toggle {
+  background: rgba(255, 107, 53, 0.15);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary-light);
+}
+
+/* QR Code Display Card */
+.qr-card {
+  margin-top: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-medium);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: fadeIn 200ms ease;
+}
+
+.qr-container {
+  background: #FFFFFF;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-container svg {
+  display: block;
+  width: 160px;
+  height: 160px;
+}
+
+.qr-caption {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-align: center;
 }
 
 /* ==========================================
@@ -1292,5 +1335,36 @@ body {
     width: 38px;
     height: 48px;
     font-size: 22px;
+  }
+}
+
+/* ==========================================
+   ACCESSIBILITY & FOCUS STATES (WCAG 2.1 AA)
+   ========================================== */
+:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 3px;
+  box-shadow: 0 0 12px var(--brand-primary-glow);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .live-pulse-dot,
+  .status-ripple,
+  .btn-shine::after {
+    animation: none !important;
   }
 }

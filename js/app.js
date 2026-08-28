@@ -25,6 +25,46 @@
     return formatSize(bytesPerSecond) + '/s';
   }
 
+  function playSuccessChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, now); // D5
+      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12); // A5
+
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(880, now + 0.08); // A5
+      osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.22); // D6
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc1.start(now);
+      osc2.start(now + 0.08);
+      osc1.stop(now + 0.45);
+      osc2.stop(now + 0.45);
+    } catch (e) {}
+  }
+
+  function triggerHaptic() {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate([60, 40, 80]); } catch (e) {}
+    }
+  }
+
   function showToast(message, type = 'success') {
     const toast = document.getElementById('toast');
     if (!toast) return;
@@ -70,6 +110,9 @@
       this.shareCodeEl = document.getElementById('share-code');
       this.copyCodeBtn = document.getElementById('copy-code');
       this.copyLinkBtn = document.getElementById('copy-link');
+      this.toggleQrBtn = document.getElementById('toggle-qr');
+      this.qrCard = document.getElementById('qr-card');
+      this.qrContainer = document.getElementById('qr-container');
       this.stopSharingBtn = document.getElementById('stop-sharing');
       this.downloadsBadge = document.getElementById('downloads-badge');
       this.sendStatusEl = document.getElementById('send-status');
@@ -146,6 +189,7 @@
       if (this.createCodeBtn) this.createCodeBtn.addEventListener('click', () => this.startSending());
       if (this.copyCodeBtn) this.copyCodeBtn.addEventListener('click', () => this.copyCode());
       if (this.copyLinkBtn) this.copyLinkBtn.addEventListener('click', () => this.copyShareLink());
+      if (this.toggleQrBtn) this.toggleQrBtn.addEventListener('click', () => this.toggleQrCode());
       if (this.stopSharingBtn) this.stopSharingBtn.addEventListener('click', () => this.stopSharing());
 
       // Receive actions
@@ -178,12 +222,19 @@
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       const codeParam = params.get('code');
+      const autoConnect = params.get('auto');
 
       if (codeParam && codeParam.length === 6) {
         this.switchTab('receive');
         if (this.codeInput) {
           this.codeInput.value = codeParam;
-          if (this.connectBtn) this.connectBtn.disabled = false;
+          if (this.connectBtn) {
+            this.connectBtn.disabled = false;
+            this.connectBtn.classList.add('ready-pulse');
+          }
+          if (autoConnect === 'true' || autoConnect === '1') {
+            setTimeout(() => this.startReceiving(), 300);
+          }
         }
       } else if (tabParam === 'send') {
         this.switchTab('send');
@@ -238,8 +289,8 @@
     }
 
     renderCodeDigits(code) {
-      this.activeTransferCode = code;
-      if (this.shareCodeEl) this.shareCodeEl.textContent = code;
+      this.activeTransferCode = String(code);
+      if (this.shareCodeEl) this.shareCodeEl.textContent = String(code);
       const digits = String(code).split('');
       this.digitBoxes.forEach((box, index) => {
         if (box) {
@@ -247,6 +298,30 @@
           box.classList.add('filled');
         }
       });
+
+      // Render QR Code SVG
+      this.renderQrCode(code);
+    }
+
+    renderQrCode(code) {
+      if (!this.qrContainer) return;
+      const shareUrl = `${window.location.origin}/?code=${code}&auto=1`;
+      if (typeof OmQRCode !== 'undefined' && OmQRCode.generateSvg) {
+        this.qrContainer.innerHTML = OmQRCode.generateSvg(shareUrl, { size: 160, margin: 2 });
+      }
+    }
+
+    toggleQrCode() {
+      if (!this.qrCard) return;
+      const isHidden = this.qrCard.classList.contains('hidden');
+      if (isHidden) {
+        this.qrCard.classList.remove('hidden');
+        if (this.toggleQrBtn) this.toggleQrBtn.classList.add('active-toggle');
+        if (this.activeTransferCode) this.renderQrCode(this.activeTransferCode);
+      } else {
+        this.qrCard.classList.add('hidden');
+        if (this.toggleQrBtn) this.toggleQrBtn.classList.remove('active-toggle');
+      }
     }
 
     async startSending() {
@@ -316,6 +391,9 @@
         }
         if (this.progressFill) this.progressFill.style.width = '100%';
         if (this.progressPercentEl) this.progressPercentEl.textContent = '100%';
+
+        playSuccessChime();
+        triggerHaptic();
         showToast(`Device downloaded file! (${downloadsCount} total)`, 'success');
       });
 
@@ -380,6 +458,9 @@
         if (this.receiveStatusEl) this.receiveStatusEl.textContent = '✓ File downloaded successfully!';
         if (this.receiveStatusRipple) this.receiveStatusRipple.className = 'status-ripple complete';
         if (this.connectionStatusEl) this.connectionStatusEl.textContent = 'Download Complete';
+
+        playSuccessChime();
+        triggerHaptic();
         showToast('File downloaded successfully!', 'success');
       });
 

@@ -66,7 +66,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
 
   <!-- Styles -->
-  <link rel="stylesheet" href="/css/styles.css?v=3.0.0">
+  <link rel="stylesheet" href="/css/styles.css?v=3.1.0">
 
   <!-- Schema.org Structured Data (JSON-LD) -->
   <script type="application/ld+json">
@@ -310,6 +310,21 @@
                   </svg>
                   <span>Copy Link</span>
                 </button>
+                <button class="btn-action" id="toggle-qr" title="Show QR Code for mobile">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                  </svg>
+                  <span>QR Code</span>
+                </button>
+              </div>
+
+              <!-- Interactive Mobile QR Card -->
+              <div class="qr-card hidden" id="qr-card">
+                <div class="qr-container" id="qr-container"></div>
+                <p class="qr-caption">Scan with mobile camera for instant transfer</p>
               </div>
             </div>
 
@@ -678,11 +693,12 @@
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <!-- OmShare Modular Architecture -->
-  <script src="/js/env-config.js?v=3.0.0"></script>
-  <script src="/js/config.js?v=3.0.0"></script>
-  <script src="/js/ajax.js?v=3.0.0"></script>
-  <script src="/js/signaling.js?v=3.0.0"></script>
-  <script src="/js/webrtc.js?v=3.0.0"></script>
-  <script src="/js/app.js?v=3.0.0"></script>
+  <script src="/js/env-config.js?v=3.1.0"></script>
+  <script src="/js/config.js?v=3.1.0"></script>
+  <script src="/js/ajax.js?v=3.1.0"></script>
+  <script src="/js/qrcode.js?v=3.1.0"></script>
+  <script src="/js/signaling.js?v=3.1.0"></script>
+  <script src="/js/webrtc.js?v=3.1.0"></script>
+  <script src="/js/app.js?v=3.1.0"></script>
 </body>
 </html>

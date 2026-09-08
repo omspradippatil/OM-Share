@@ -79,6 +79,9 @@
     constructor() {
       this.webrtc = null;
       this.currentFile = null;
+      this.selectedFiles = [];
+      this.isFolder = false;
+      this.folderName = '';
       this.transferStartTime = null;
       this.activeTransferCode = null;
 
@@ -101,9 +104,16 @@
       // Send panel elements
       this.dropzone = document.getElementById('dropzone');
       this.fileInput = document.getElementById('file-input');
+      this.folderInput = document.getElementById('folder-input');
+      this.btnBrowseFiles = document.getElementById('btn-browse-files');
+      this.btnBrowseFolder = document.getElementById('btn-browse-folder');
       this.filePreview = document.getElementById('file-preview');
       this.filenameEl = document.getElementById('filename');
       this.filesizeEl = document.getElementById('filesize');
+      this.previewIconBox = document.getElementById('preview-icon-box');
+      this.batchTypeTag = document.getElementById('batch-type-tag');
+      this.batchFileList = document.getElementById('batch-file-list');
+      this.addMoreBtn = document.getElementById('add-more-btn');
       this.removeFileBtn = document.getElementById('remove-file');
       this.createCodeBtn = document.getElementById('create-code');
       this.sharingPanel = document.getElementById('sharing-panel');
@@ -159,9 +169,34 @@
         tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
       });
 
-      // File selection
-      this.dropzone.addEventListener('click', () => this.fileInput.click());
+      // File & Folder selection buttons
+      if (this.btnBrowseFiles) {
+        this.btnBrowseFiles.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.fileInput.click();
+        });
+      }
+      if (this.btnBrowseFolder) {
+        this.btnBrowseFolder.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.folderInput.click();
+        });
+      }
+      if (this.addMoreBtn) {
+        this.addMoreBtn.addEventListener('click', () => {
+          this.fileInput.click();
+        });
+      }
+
+      this.dropzone.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-dropzone')) return;
+        this.fileInput.click();
+      });
+
       this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+      if (this.folderInput) {
+        this.folderInput.addEventListener('change', (e) => this.handleFolderSelect(e));
+      }
 
       // Drag & Drop
       ['dragenter', 'dragover'].forEach(eventName => {
@@ -178,9 +213,10 @@
         });
       });
 
-      this.dropzone.addEventListener('drop', (e) => {
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-          this.selectFile(e.dataTransfer.files[0]);
+      this.dropzone.addEventListener('drop', async (e) => {
+        const scanned = await this.scanDroppedEntries(e.dataTransfer);
+        if (scanned.length > 0) {
+          this.addFiles(scanned);
         }
       });
 
@@ -217,75 +253,214 @@
       if (this.cancelReceiveBtn) this.cancelReceiveBtn.addEventListener('click', () => this.cancelReceive());
     }
 
-    checkUrlParameters() {
-      if (typeof window === 'undefined' || !window.location) return;
-      const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab');
-      const codeParam = params.get('code');
-      const autoConnect = params.get('auto');
+    async scanDroppedEntries(dataTransfer) {
+      const items = dataTransfer.items;
+      const fileList = [];
 
-      if (codeParam && codeParam.length === 6) {
-        this.switchTab('receive');
-        if (this.codeInput) {
-          this.codeInput.value = codeParam;
-          if (this.connectBtn) {
-            this.connectBtn.disabled = false;
-            this.connectBtn.classList.add('ready-pulse');
-          }
-          if (autoConnect === 'true' || autoConnect === '1') {
-            setTimeout(() => this.startReceiving(), 300);
+      if (items && items.length > 0 && items[0].webkitGetAsEntry) {
+        const queue = [];
+        for (let i = 0; i < items.length; i++) {
+          const entry = items[i].webkitGetAsEntry();
+          if (entry) {
+            if (entry.isDirectory && !this.folderName) {
+              this.isFolder = true;
+              this.folderName = entry.name;
+            }
+            queue.push(this.traverseEntry(entry, ''));
           }
         }
-      } else if (tabParam === 'send') {
-        this.switchTab('send');
-      } else if (tabParam === 'receive') {
-        this.switchTab('receive');
+        const results = await Promise.all(queue);
+        results.forEach(arr => fileList.push(...arr));
+      } else if (dataTransfer.files) {
+        for (let i = 0; i < dataTransfer.files.length; i++) {
+          const f = dataTransfer.files[i];
+          fileList.push({ file: f, path: f.name, name: f.name, size: f.size });
+        }
       }
+      return fileList;
     }
 
-    async initNetworkStatus() {
-      const updateStatus = async () => {
-        const isOnline = await ajax.checkConnectivity();
-        if (this.connectionStatusEl) {
-          this.connectionStatusEl.textContent = isOnline ? 'Ready • Online' : 'Offline • Check Connection';
-        }
-      };
-
-      window.addEventListener('online', updateStatus);
-      window.addEventListener('offline', updateStatus);
-      updateStatus();
-    }
-
-    switchTab(tabId) {
-      this.tabs.forEach(t => t.classList.remove('active'));
-      this.panels.forEach(p => p.classList.remove('active'));
-
-      const targetTab = document.getElementById('tab-' + tabId);
-      const targetPanel = document.getElementById('panel-' + tabId);
-
-      if (targetTab) targetTab.classList.add('active');
-      if (targetPanel) targetPanel.classList.add('active');
+    traverseEntry(entry, path) {
+      if (entry.isFile) {
+        return new Promise((resolve) => {
+          entry.file((file) => {
+            resolve([{
+              file: file,
+              path: path ? `${path}/${file.name}` : file.name,
+              name: file.name,
+              size: file.size
+            }]);
+          }, () => resolve([]));
+        });
+      } else if (entry.isDirectory) {
+        const dirReader = entry.createReader();
+        const dirPath = path ? `${path}/${entry.name}` : entry.name;
+        return new Promise((resolve) => {
+          const readAllEntries = () => {
+            dirReader.readEntries(async (entries) => {
+              if (entries.length === 0) {
+                resolve([]);
+              } else {
+                const promises = entries.map(e => this.traverseEntry(e, dirPath));
+                const nested = await Promise.all(promises);
+                const combined = nested.flat();
+                dirReader.readEntries(async (moreEntries) => {
+                  if (moreEntries.length > 0) {
+                    const moreNested = await Promise.all(moreEntries.map(e => this.traverseEntry(e, dirPath)));
+                    resolve(combined.concat(moreNested.flat()));
+                  } else {
+                    resolve(combined);
+                  }
+                }, () => resolve(combined));
+              }
+            }, () => resolve([]));
+          };
+          readAllEntries();
+        });
+      }
+      return Promise.resolve([]);
     }
 
     handleFileSelect(e) {
-      const file = e.target.files[0];
-      if (file) this.selectFile(file);
+      const files = Array.from(e.target.files || []);
+      if (files.length > 0) {
+        const items = files.map(f => ({
+          file: f,
+          path: f.name,
+          name: f.name,
+          size: f.size
+        }));
+        this.addFiles(items);
+      }
+      this.fileInput.value = '';
     }
 
-    selectFile(file) {
-      this.currentFile = file;
-      if (this.filenameEl) this.filenameEl.textContent = file.name;
-      if (this.filesizeEl) this.filesizeEl.textContent = formatSize(file.size);
+    handleFolderSelect(e) {
+      const files = Array.from(e.target.files || []);
+      if (files.length > 0) {
+        this.isFolder = true;
+        const firstRel = files[0].webkitRelativePath || '';
+        this.folderName = firstRel ? firstRel.split('/')[0] : 'Folder';
+
+        const items = files.map(f => ({
+          file: f,
+          path: f.webkitRelativePath || f.name,
+          name: f.name,
+          size: f.size
+        }));
+        this.addFiles(items, true);
+      }
+      if (this.folderInput) this.folderInput.value = '';
+    }
+
+    addFiles(newItems, isFolder = false) {
+      if (isFolder) {
+        this.selectedFiles = newItems;
+      } else {
+        const existingPaths = new Set(this.selectedFiles.map(f => f.path));
+        newItems.forEach(item => {
+          if (!existingPaths.has(item.path)) {
+            this.selectedFiles.push(item);
+            existingPaths.add(item.path);
+          }
+        });
+      }
+
+      this.updateBatchPreview();
+    }
+
+    removeFileItem(index) {
+      this.selectedFiles.splice(index, 1);
+      if (this.selectedFiles.length === 0) {
+        this.clearFile();
+      } else {
+        this.updateBatchPreview();
+      }
+    }
+
+    updateBatchPreview() {
+      if (this.selectedFiles.length === 0) {
+        this.clearFile();
+        return;
+      }
+
+      const count = this.selectedFiles.length;
+      const totalSize = this.selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
 
       this.dropzone.classList.add('hidden');
       this.filePreview.classList.remove('hidden');
+
+      if (count === 1 && !this.isFolder) {
+        const file = this.selectedFiles[0];
+        if (this.filenameEl) this.filenameEl.textContent = file.name;
+        if (this.filesizeEl) this.filesizeEl.textContent = formatSize(file.size);
+        if (this.batchTypeTag) this.batchTypeTag.textContent = 'Single File';
+        if (this.previewIconBox) this.previewIconBox.className = 'file-icon-box';
+        if (this.batchFileList) this.batchFileList.classList.add('hidden');
+      } else {
+        const title = this.isFolder && this.folderName
+          ? `${this.folderName} (${count} files)`
+          : `${count} files selected`;
+        
+        if (this.filenameEl) this.filenameEl.textContent = title;
+        if (this.filesizeEl) this.filesizeEl.textContent = formatSize(totalSize);
+        if (this.batchTypeTag) this.batchTypeTag.textContent = this.isFolder ? 'Folder Archive' : 'Multi-File Batch';
+        if (this.previewIconBox) this.previewIconBox.className = 'file-icon-box folder-icon-box';
+
+        if (this.batchFileList) {
+          this.batchFileList.innerHTML = this.selectedFiles.map((item, idx) => `
+            <div class="batch-file-item">
+              <div class="batch-file-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span class="batch-file-item-name" title="${item.path}">${item.path}</span>
+              </div>
+              <div class="batch-file-item-right">
+                <span class="batch-file-item-size">${formatSize(item.size)}</span>
+                <button type="button" class="batch-file-item-del" data-index="${idx}" title="Remove file">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+          `).join('');
+
+          this.batchFileList.querySelectorAll('.batch-file-item-del').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              const idx = parseInt(btn.dataset.index, 10);
+              this.removeFileItem(idx);
+            });
+          });
+
+          this.batchFileList.classList.remove('hidden');
+        }
+      }
     }
 
     clearFile() {
       this.currentFile = null;
+      this.selectedFiles = [];
+      this.isFolder = false;
+      this.folderName = '';
       if (this.fileInput) this.fileInput.value = '';
+      if (this.folderInput) this.folderInput.value = '';
       if (this.dropzone) this.dropzone.classList.remove('hidden');
       if (this.filePreview) this.filePreview.classList.add('hidden');
+      if (this.batchFileList) this.batchFileList.classList.add('hidden');
+    }
+
+    async packageFilesToZip(items, archiveName) {
+      if (typeof JSZip === 'undefined') {
+        throw new Error('JSZip compression engine not loaded. Please refresh.');
+      }
+      const zip = new JSZip();
+      for (const item of items) {
+        zip.file(item.path, item.file);
+      }
+      const zipBlob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 1 }
+      });
+      return new File([zipBlob], archiveName, { type: 'application/zip' });
     }
 
     renderCodeDigits(code) {
@@ -325,15 +500,28 @@
     }
 
     async startSending() {
-      if (!this.currentFile) {
-        showToast('Please select a file first', 'error');
+      if (!this.selectedFiles || this.selectedFiles.length === 0) {
+        showToast('Please select at least one file or folder', 'error');
         return;
       }
 
       this.createCodeBtn.disabled = true;
-      this.createCodeBtn.innerHTML = '<span>Generating Session...</span>';
 
       try {
+        let fileToTransfer = null;
+        if (this.selectedFiles.length === 1 && !this.isFolder) {
+          fileToTransfer = this.selectedFiles[0].file;
+        } else {
+          this.createCodeBtn.innerHTML = `<span>Packaging ${this.selectedFiles.length} files...</span>`;
+          const archiveName = this.isFolder && this.folderName
+            ? `${this.folderName}.zip`
+            : `OmShare_Archive_${this.selectedFiles.length}_Files.zip`;
+          fileToTransfer = await this.packageFilesToZip(this.selectedFiles, archiveName);
+        }
+
+        this.currentFile = fileToTransfer;
+        this.createCodeBtn.innerHTML = '<span>Generating Session...</span>';
+
         this.webrtc = new WebRTCManager();
         this.bindWebRTCSenderEvents(this.webrtc);
 

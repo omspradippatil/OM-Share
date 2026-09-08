@@ -311,6 +311,40 @@ body {
   color: var(--text-muted);
 }
 
+.dropzone-btn-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.btn-dropzone {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-pill);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-dropzone:hover {
+  background: rgba(255, 107, 53, 0.15);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary-light);
+  transform: translateY(-1px);
+}
+
 .format-pills {
   display: flex;
   flex-wrap: wrap;
@@ -331,21 +365,27 @@ body {
 }
 
 /* ==========================================
-   FILE PREVIEW CARD
+   BATCH FILE PREVIEW CARD
    ========================================== */
-.file-info-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+.batch-preview-card {
   background: var(--bg-card-hover);
   border: 1px solid var(--border-medium);
   border-radius: 16px;
-  padding: 16px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.batch-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .file-icon-box {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
   background: rgba(255, 107, 53, 0.12);
   border: 1px solid rgba(255, 107, 53, 0.25);
@@ -354,6 +394,12 @@ body {
   justify-content: center;
   color: var(--brand-primary);
   flex-shrink: 0;
+}
+
+.file-icon-box.folder-icon-box {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: var(--brand-emerald);
 }
 
 .file-meta {
@@ -395,13 +441,19 @@ body {
   color: var(--brand-emerald);
 }
 
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .btn-icon {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
+  background: var(--bg-pill);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -410,7 +462,103 @@ body {
 }
 
 .btn-icon:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+#remove-file:hover {
   background: rgba(239, 68, 68, 0.15);
+  color: var(--brand-danger);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Scrollable Batch File List */
+.batch-file-list {
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.batch-file-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.batch-file-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.batch-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.batch-file-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.batch-file-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.batch-file-item-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.batch-file-item-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.batch-file-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.batch-file-item-size {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.batch-file-item-del {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  transition: color var(--transition-fast);
+}
+
+.batch-file-item-del:hover {
   color: var(--brand-danger);
 }
 

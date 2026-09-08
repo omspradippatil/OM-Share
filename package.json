@@ -20,7 +20,8 @@
   "author": "OmShare",
   "license": "MIT",
   "dependencies": {
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "jszip": "^3.10.1"
   },
   "devDependencies": {
     "@playwright/cli": "^0.1.18",
